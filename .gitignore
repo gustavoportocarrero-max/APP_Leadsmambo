@@ -1,0 +1,12 @@
+# Permisos/ajustes locales de Claude Code (específicos de la máquina)
+.claude/settings.local.json
+
+# Dependencias / build (por si más adelante se agrega tooling)
+node_modules/
+dist/
+.vercel/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log

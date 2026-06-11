@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#1D0446" />
+  <title>mambo · Pipeline</title>
+
+  <!-- Google Fonts: Poppins (display) + Mulish (body) + JetBrains Mono (data) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@700;800&family=Mulish:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app" id="app">
+
+    <!-- ===== HEADER (pantalla 01) ===== -->
+    <header class="app-header">
+      <div class="brand-row">
+        <div class="wordmark">mambo<span>·pipeline</span></div>
+        <input type="file" id="csvInput" accept=".csv" class="sr-only" />
+        <button class="icon-btn" id="importBtn" title="Importar CSV de Pipedrive" aria-label="Importar CSV">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
+      </div>
+      <div class="header-stats">
+        <div class="stat" id="statChanges">
+          <div class="stat-label">Cambios</div>
+          <div class="stat-value" id="changeCount">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">En juego</div>
+          <div class="stat-value amount" id="totalAmount">US$0</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== FILTROS ===== -->
+    <section class="filters">
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input type="search" class="search-input" id="search" placeholder="Buscar organización o negocio…" />
+      </div>
+      <div class="filter-row">
+        <select class="owner-select" id="ownerFilter" aria-label="Filtrar por dueño">
+          <option value="">Todos los dueños</option>
+        </select>
+        <button class="lost-toggle" id="lostToggle" aria-pressed="false">
+          Ver perdidos
+        </button>
+      </div>
+      <div class="stage-chips" id="stageChips" role="group" aria-label="Filtrar por etapa"></div>
+    </section>
+
+    <!-- ===== LISTA DE NEGOCIOS ===== -->
+    <section class="list" id="dealList"></section>
+
+    <!-- FAB exportar -->
+    <button class="fab" id="exportFab" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Exportar cambios
+      <span class="count" id="fabCount">0</span>
+    </button>
+  </main>
+
+  <!-- ===== DETALLE / EDICIÓN (pantalla 02 + 03) ===== -->
+  <aside class="detail" id="detail" aria-hidden="true">
+    <header class="detail-header">
+      <button class="icon-btn" id="backBtn" aria-label="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="titles">
+        <div class="d-org" id="dOrg"></div>
+        <div class="d-title" id="dTitle"></div>
+      </div>
+    </header>
+
+    <div class="detail-body" id="detailBody">
+      <!-- tags read-only -->
+      <div>
+        <div class="section-label">Ficha del negocio</div>
+        <div class="tags" id="dTags"></div>
+      </div>
+
+      <!-- etapa -->
+      <div>
+        <div class="section-label">Etapa</div>
+        <div class="stage-grid" id="stageGrid" role="group" aria-label="Seleccionar etapa"></div>
+      </div>
+
+      <!-- monto -->
+      <div class="field">
+        <label for="amountInput">Monto (US$)</label>
+        <div class="amount-field">
+          <span class="prefix">$</span>
+          <input class="input mono" id="amountInput" type="number" inputmode="numeric" min="0" step="1000" />
+        </div>
+      </div>
+
+      <!-- probabilidad -->
+      <div class="field">
+        <div class="prob-head">
+          <label for="probInput">Probabilidad</label>
+          <span class="prob-val" id="probVal">—</span>
+        </div>
+        <input type="range" id="probInput" min="0" max="100" step="5" />
+      </div>
+
+      <!-- comentario -->
+      <div class="field">
+        <label for="commentInput">Comentario</label>
+        <textarea id="commentInput" placeholder="Notas para el equipo…"></textarea>
+      </div>
+
+      <!-- bloque perdido (pantalla 03) -->
+      <div class="lost-block">
+        <div class="switch-row">
+          <span class="switch-label">Marcar como perdido</span>
+          <button class="switch" id="lostSwitch" aria-pressed="false" aria-label="Marcar perdido"></button>
+        </div>
+        <div class="loss-reasons hidden" id="lossReasons">
+          <div class="section-label" style="margin-top:var(--s-4)">Motivo de pérdida (obligatorio)</div>
+          <div class="reason-chips" id="reasonChips" role="group"></div>
+          <div class="loss-error" id="lossError">Selecciona un motivo para poder guardar.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- barra de guardado sticky -->
+    <div class="save-bar">
+      <button class="btn btn-ghost" id="cancelBtn">Cancelar</button>
+      <button class="btn btn-primary" id="saveBtn">Guardar</button>
+    </div>
+  </aside>
+
+  <!-- ===== BOTTOM SHEET EXPORTAR (pantalla 04) ===== -->
+  <div class="scrim" id="scrim"></div>
+  <section class="sheet" id="sheet" aria-hidden="true" aria-label="Exportar cambios">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <div class="sheet-title">Exportar cambios</div>
+      <div class="sheet-sub" id="sheetSub">0 negocios modificados</div>
+    </div>
+    <div class="sheet-list" id="sheetList"></div>
+    <div class="sheet-actions">
+      <div class="row">
+        <button class="btn btn-line" id="copyBtn">Copiar resumen</button>
+        <button class="btn btn-primary" id="csvBtn" style="box-shadow:none">Descargar CSV</button>
+      </div>
+      <button class="btn-reset" id="resetBtn">Reiniciar cambios</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- PapaParse para importar el CSV real de Pipedrive -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

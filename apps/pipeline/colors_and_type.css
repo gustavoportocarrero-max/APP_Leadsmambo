@@ -1,0 +1,63 @@
+/* ============================================================
+   mambo · foundations de marca — colors & type
+   Fuente de verdad de tokens. No hardcodear hex fuera de aquí
+   (salvo los colores de etapa, definidos en styles.css).
+   ============================================================ */
+
+:root {
+  /* ---- Color · primarios ---- */
+  --eggplant: #1D0446;   /* tinta / texto */
+  --blue:     #1E56CD;
+  --navy:     #003179;
+
+  /* ---- Color · acento + mascota ---- */
+  --coral:      #FA5478; /* único acento por pantalla */
+  --lavender:   #DCD7FF; /* superficie */
+  --lav-deep:   #B8AEF5;
+
+  /* ---- Color · secundarios + neutros ---- */
+  --pink-mist: #FFF0FB;
+  --blue-mist: #E7EEFF;
+  --sky:       #B7DBF1;
+  --paper:     #FAFAF7; /* paper warm */
+  --mute-1:    #6B6582;
+
+  /* superficies derivadas */
+  --surface:        var(--paper);
+  --surface-raised: #FFFFFF;
+  --ink:            var(--eggplant);
+  --ink-soft:       var(--mute-1);
+  --hairline:       rgba(29, 4, 70, 0.08);
+
+  /* ---- Tipografía ---- */
+  --font-display: "Poppins", "Segoe UI", system-ui, sans-serif;
+  --font-body:    "Mulish", "Segoe UI", system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular",
+                  "Consolas", monospace;
+
+  --track-display: -0.03em; /* −0.02 a −0.04em */
+
+  /* ---- Radii ---- */
+  --r-sm: 8px;
+  --r-md: 14px;   /* inputs */
+  --r-lg: 22px;   /* cards */
+  --r-pill: 999px;/* botones */
+
+  /* ---- Spacing — grilla 4px ---- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* ---- Sombras — restringidas, paper sobre paper ---- */
+  --shadow-2: 0 4px 14px rgba(11, 4, 33, 0.08);
+  --shadow-coral: 0 8px 24px rgba(250, 84, 120, 0.28); /* solo CTA coral */
+
+  /* ---- Motion ---- */
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.2, 1);
+  --t-fast: 120ms;
+  --t-med: 220ms;
+}
