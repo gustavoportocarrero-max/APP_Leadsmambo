@@ -6,6 +6,15 @@
   <meta name="theme-color" content="#1D0446" />
   <title>mambo · Pipeline</title>
 
+  <!-- PWA: instalable en Android (Chrome) e iOS (Agregar a pantalla de inicio) -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mambo" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
   <!-- Google Fonts: Poppins (display) + Mulish (body) + JetBrains Mono (data) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -159,5 +168,15 @@
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
+
+  <!-- Registro del service worker (carga rápida + offline básico) -->
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("/service-worker.js", { scope: "/" })
+          .catch(function (err) { console.warn("SW no registrado:", err); });
+      });
+    }
+  </script>
 </body>
 </html>

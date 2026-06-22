@@ -11,12 +11,15 @@ funcional y modelo de datos. Sin backend — persistencia en `localStorage`.
 
 ```
 apps/pipeline/
-├── index.html          # estructura de la app (pantallas 01–04)
-├── styles.css          # estilos de la app (importa colors_and_type.css)
-├── colors_and_type.css # foundations de marca: color, tipografía, tokens
-├── data.js             # 16 negocios de ejemplo + catálogos (etapas, motivos)
-├── app.js              # lógica: filtros, edición, perdido, export, import CSV
-└── vercel.json         # config de deploy estático
+├── index.html              # estructura de la app (pantallas 01–04)
+├── styles.css              # estilos de la app (importa colors_and_type.css)
+├── colors_and_type.css     # foundations de marca: color, tipografía, tokens
+├── data.js                 # 16 negocios de ejemplo + catálogos (etapas, motivos)
+├── app.js                  # lógica: filtros, edición, perdido, export, import CSV
+├── manifest.webmanifest    # PWA: nombre, íconos, display standalone, colores
+├── service-worker.js       # PWA: precache del app shell + offline básico
+├── icons/                  # íconos PWA (192, 512, 512-maskable, apple-touch 180)
+└── vercel.json             # config de deploy estático
 ```
 
 ## Pantallas
@@ -58,9 +61,31 @@ El piloto arranca con 16 negocios de ejemplo en `data.js`. Para cargar datos rea
 - Las etapas se reconocen por su `id` (`target`, `primera`, `contacto`, `propuesta`,
   `cierre`, `nurturing`) o por su etiqueta visible.
 
+## PWA — instalable en iPhone y Android
+
+La app es una **Progressive Web App** instalable que se abre en pantalla completa
+(sin barra del navegador), con ícono propio en la pantalla de inicio.
+
+- **Android (Chrome):** al abrir la URL desplegada, Chrome ofrece **"Instalar app"**
+  (también desde el menú ⋮ → *Instalar aplicación*). Requisitos cumplidos: HTTPS,
+  `manifest.webmanifest` (name, short_name, start_url, `display: standalone`, íconos
+  192 + 512 + maskable) y un service worker con manejador `fetch`.
+- **iPhone (Safari):** botón **Compartir → "Agregar a pantalla de inicio"**. Usa el
+  `apple-touch-icon` de 180×180 y abre en modo standalone.
+
+Probado en local (manifest con MIME `application/manifest+json`, SW activo en scope
+`/`, app shell + fuentes cacheadas para offline). **Importante en Vercel:** las rutas
+del manifest/íconos/SW son absolutas (`/manifest.webmanifest`, `/icons/…`,
+`/service-worker.js`), por lo que el **Root Directory** del proyecto debe ser
+`apps/pipeline` (ver sección Deploy).
+
+> Nota: no se usa Vite. Por eso los archivos PWA viven en la raíz servida
+> (`apps/pipeline/`) en lugar de una carpeta `public/` — equivalen a lo mismo en un
+> sitio sin bundler.
+
 ## Deploy
 
-Estático + cliente. Sugerido: **Vercel**.
+Estático + cliente. Sugerido: **Vercel** con **Root Directory = `apps/pipeline`**.
 
 ```bash
 cd apps/pipeline
