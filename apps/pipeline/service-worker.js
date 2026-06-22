@@ -7,7 +7,7 @@
      - cross-origin (fonts, PapaParse) → network, runtime-cache best-effort
    ============================================================ */
 
-const CACHE = "mambo-pipeline-v1";
+const CACHE = "mambo-pipeline-v2";
 
 // Archivos locales que componen el "app shell".
 const PRECACHE = [

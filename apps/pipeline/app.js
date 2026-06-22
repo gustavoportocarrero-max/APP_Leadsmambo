@@ -64,12 +64,17 @@
      ============================================================ */
   function load() {
     const saved = localStorage.getItem(STORAGE_KEY);
+    const currentVersion = (typeof SEED_VERSION !== "undefined") ? SEED_VERSION : null;
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        deals = parsed.deals || [];
-        original = parsed.original || {};
-        if (deals.length) return;
+        // Si cambió la versión de los datos empaquetados, se descarta el guardado
+        // viejo y se recargan los SEED_DEALS (refresco de la base del piloto).
+        if (parsed.seedVersion === currentVersion) {
+          deals = parsed.deals || [];
+          original = parsed.original || {};
+          if (deals.length) return;
+        }
       } catch (_) { /* cae al seed */ }
     }
     seedFrom(SEED_DEALS);
@@ -83,7 +88,11 @@
   }
 
   function persist() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ deals, original }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      deals,
+      original,
+      seedVersion: (typeof SEED_VERSION !== "undefined") ? SEED_VERSION : null,
+    }));
   }
 
   // Solo los campos editables cuentan como "cambio"

@@ -14,7 +14,7 @@ apps/pipeline/
 ├── index.html              # estructura de la app (pantallas 01–04)
 ├── styles.css              # estilos de la app (importa colors_and_type.css)
 ├── colors_and_type.css     # foundations de marca: color, tipografía, tokens
-├── data.js                 # 16 negocios de ejemplo + catálogos (etapas, motivos)
+├── data.js                 # datos de arranque (131 negocios, ver SEED_DEALS) + catálogos
 ├── app.js                  # lógica: filtros, edición, perdido, export, import CSV
 ├── manifest.webmanifest    # PWA: nombre, íconos, display standalone, colores
 ├── service-worker.js       # PWA: precache del app shell + offline básico
@@ -50,16 +50,27 @@ Luego abrir <http://localhost:4321>. En el repo se incluye además
 `.claude/static-server.ps1` (servidor estático en PowerShell, sin dependencias) usado
 para el preview en Windows.
 
-## Datos reales (producción)
+## Datos de arranque (`data.js`)
 
-El piloto arranca con 16 negocios de ejemplo en `data.js`. Para cargar datos reales:
+La app lee los negocios al iniciar desde `data.js` (`SEED_DEALS`), que se carga con
+`<script src="data.js">`. **No hay CSV empaquetado ni build**: `data.js` ES la fuente
+de datos. Actualmente contiene **131 negocios** generados desde el export de Pipedrive
+`Segunda base de datos app pipeline mambo.csv`.
 
-- Usar el botón **importar** (icono arriba a la derecha) y seleccionar el **CSV
-  exportado de Pipedrive**. El import usa **PapaParse** y mapea automáticamente las
-  cabeceras comunes (Organización, Título, Propietario, Etapa, Monto, Probabilidad,
-  Industria, Origen, …) al modelo de datos.
-- Las etapas se reconocen por su `id` (`target`, `primera`, `contacto`, `propuesta`,
-  `cierre`, `nurturing`) o por su etiqueta visible.
+`SEED_VERSION` marca la versión de estos datos. Al cambiarla, la app descarta el
+`localStorage` viejo y recarga `SEED_DEALS` (así un refresco de base de datos se
+propaga a los usuarios que ya abrieron la app). El service worker también sube de
+versión (`mambo-pipeline-vN`) para que no quede `data.js` cacheado.
+
+**Para refrescar los datos** (regenerar `data.js` desde un CSV nuevo de Pipedrive):
+mapear las columnas `Negocio - Organización/Título/Valor del negocio/Propietario/
+Estado/Fuente lead/Fecha de cierre prevista/Probabilidad/Vertical/Etapa/Tipo de
+cliente` y `Organización - Industria` al modelo, asignar `id` correlativo, y subir
+`SEED_VERSION` + la versión del cache del SW.
+
+> El botón **importar** (icono arriba a la derecha) sigue disponible para cargar un
+> CSV de Pipedrive en runtime (vía **PapaParse**), pero eso solo afecta `localStorage`
+> en ese dispositivo — no cambia los datos empaquetados.
 
 ## PWA — instalable en iPhone y Android
 
