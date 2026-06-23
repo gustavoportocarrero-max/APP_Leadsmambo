@@ -2234,10 +2234,14 @@ const SEED_DEALS =
 ;
 
 // Catalogos del modelo
+// STAGES es la FUENTE DE VERDAD del orden del pipeline (inicio -> fin).
+// Toda la app (selector de etapa, filtros, agrupaciones, resúmenes) recorre
+// este arreglo, así que el orden de visualización se define aquí una sola vez.
+// Solo se reordena; los nombres y colores de cada etapa no cambian.
 const STAGES = [
   { id: "target",    label: "Target",                    bg: "#B7DBF1", text: "#003179" },
-  { id: "primera",   label: "Primera reunión",           bg: "#E7EEFF", text: "#1E56CD" },
   { id: "contacto",  label: "Contacto establecido",      bg: "#1E56CD", text: "#FFFFFF" },
+  { id: "primera",   label: "Primera reunión",           bg: "#E7EEFF", text: "#1E56CD" },
   { id: "propuesta", label: "Presentación de propuesta", bg: "#003179", text: "#FFFFFF" },
   { id: "cierre",    label: "Follow-up y cierre",        bg: "#FA5478", text: "#FFFFFF" },
   { id: "nurturing", label: "Nurturing",                 bg: "#DCD7FF", text: "#1D0446" }
