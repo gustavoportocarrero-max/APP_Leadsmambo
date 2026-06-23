@@ -1,19 +1,28 @@
 /* ============================================================
    mambo · App de Pipeline — lógica
-   Vanilla JS · persistencia en localStorage · sin backend (piloto)
+   Fuente de verdad: Supabase (compartida, tiempo real).
+   Sin login: identidad de partner en localStorage; cada quien edita
+   solo SUS negocios (barrera de UI). Si Supabase no está configurado,
+   corre en "modo demo" con los datos locales (data.js).
    ============================================================ */
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "mambo.pipeline.v1";
+  const STORAGE_USER = "mambo.pipeline.user";
+  const STORAGE_PENDING = "mambo.pipeline.pending";
+  const STORAGE_DEMO = "mambo.pipeline.demo"; // overrides locales cuando no hay Supabase
   const stageById = Object.fromEntries(STAGES.map((s) => [s.id, s]));
 
   /* ---------- estado ---------- */
-  let deals = [];          // estado vigente (editable)
-  let original = {};       // snapshot original por id (para detectar cambios y reiniciar)
+  let deals = [];
   let filters = { owner: "", stage: "", text: "", showLost: false };
-  let editingId = null;    // id del negocio abierto en detalle
-  let draft = null;        // copia de trabajo del negocio en edición
+  let editingId = null;     // id del negocio abierto en detalle
+  let draft = null;         // copia de trabajo del negocio en edición
+  let draftEditable = false;// si el usuario actual puede editar el draft
+  let mode = "demo";        // "supabase" | "demo"
+  let currentUser = localStorage.getItem(STORAGE_USER) || "";
+  let pendingIds = new Set(loadPending()); // negocios que YO edité (para exportar)
+  let lastWrite = { id: null, t: 0 };      // para no auto-notificar mi propio cambio
 
   /* ---------- DOM refs ---------- */
   const $ = (id) => document.getElementById(id);
@@ -28,8 +37,17 @@
     totalAmount: $("totalAmount"),
     exportFab: $("exportFab"),
     fabCount: $("fabCount"),
+    connBanner: $("connBanner"),
+    // identidad
+    identityChip: $("identityChip"),
+    identityAvatar: $("identityAvatar"),
+    identityName: $("identityName"),
+    identityOverlay: $("identityOverlay"),
+    ownerList: $("ownerList"),
     // detalle
     detail: $("detail"),
+    detailBody: $("detailBody"),
+    readonlyNotice: $("readonlyNotice"),
     dOrg: $("dOrg"),
     dTitle: $("dTitle"),
     dTags: $("dTags"),
@@ -53,54 +71,39 @@
     copyBtn: $("copyBtn"),
     csvBtn: $("csvBtn"),
     resetBtn: $("resetBtn"),
-    // import
-    importBtn: $("importBtn"),
-    csvInput: $("csvInput"),
     toast: $("toast"),
   };
 
   /* ============================================================
-     Persistencia
+     Persistencia local (solo identidad + lista de exportación)
      ============================================================ */
-  function load() {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const currentVersion = (typeof SEED_VERSION !== "undefined") ? SEED_VERSION : null;
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Si cambió la versión de los datos empaquetados, se descarta el guardado
-        // viejo y se recargan los SEED_DEALS (refresco de la base del piloto).
-        if (parsed.seedVersion === currentVersion) {
-          deals = parsed.deals || [];
-          original = parsed.original || {};
-          if (deals.length) return;
-        }
-      } catch (_) { /* cae al seed */ }
-    }
-    seedFrom(SEED_DEALS);
+  function loadPending() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_PENDING) || "[]"); }
+    catch (_) { return []; }
+  }
+  function savePending() {
+    localStorage.setItem(STORAGE_PENDING, JSON.stringify([...pendingIds]));
   }
 
-  function seedFrom(source) {
-    deals = source.map((d) => normalize(d));
-    original = {};
-    deals.forEach((d) => { original[d.id] = snapshot(d); });
-    persist();
+  // --- Modo demo: persistir ediciones locales (sin Supabase) ---
+  function loadDemoOverrides() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_DEMO) || "{}"); }
+    catch (_) { return {}; }
   }
-
-  function persist() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      deals,
-      original,
-      seedVersion: (typeof SEED_VERSION !== "undefined") ? SEED_VERSION : null,
-    }));
-  }
-
-  // Solo los campos editables cuentan como "cambio"
-  function snapshot(d) {
-    return {
+  function saveDemoOverride(d) {
+    const o = loadDemoOverrides();
+    o[d.id] = {
       stage: d.stage, amount: d.amount, prob: d.prob,
       comment: d.comment, status: d.status, lossReason: d.lossReason,
     };
+    localStorage.setItem(STORAGE_DEMO, JSON.stringify(o));
+  }
+  function seedDemoDeals() {
+    const ov = loadDemoOverrides();
+    return SEED_DEALS.map((d) => {
+      const n = normalize(d);
+      return ov[n.id] ? { ...n, ...ov[n.id] } : n;
+    });
   }
 
   function normalize(d) {
@@ -123,19 +126,23 @@
     };
   }
 
-  /* ============================================================
-     Detección de cambios
-     ============================================================ */
-  function isChanged(d) {
-    const o = original[d.id];
-    if (!o) return true;
-    const s = snapshot(d);
-    return Object.keys(s).some((k) => s[k] !== o[k]);
+  function applyDeal(d) {
+    const i = deals.findIndex((x) => x.id === d.id);
+    if (i >= 0) deals[i] = d; else deals.push(d);
   }
 
-  function changedDeals() {
-    return deals.filter(isChanged);
+  /* ============================================================
+     Permisos de edición (por propietario)
+     ============================================================ */
+  function isEditable(d) {
+    return !!currentUser && d.owner === currentUser;
   }
+
+  /* ============================================================
+     Cambios pendientes de exportar (mis ediciones de esta sesión)
+     ============================================================ */
+  function isChanged(d) { return pendingIds.has(d.id); }
+  function changedDeals() { return deals.filter((d) => pendingIds.has(d.id)); }
 
   /* ============================================================
      Helpers de formato
@@ -145,25 +152,73 @@
     return "US$" + Number(n).toLocaleString("en-US");
   }
   function initials(name) {
+    if (!name) return "··";
     return name.split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
   }
   function probText(p) { return p === null ? "—" : p + "%"; }
 
   /* ============================================================
+     Identidad — selector "¿Quién eres?"
+     ============================================================ */
+  function ownersList() {
+    const base = (typeof OWNERS !== "undefined") ? OWNERS.slice() : [];
+    const extra = [...new Set(deals.map((d) => d.owner))].filter((o) => o && !base.includes(o));
+    return base.concat(extra.sort());
+  }
+
+  function renderOwnerChoices() {
+    els.ownerList.innerHTML = ownersList().map((o) =>
+      `<button class="id-owner" data-owner="${escapeAttr(o)}">
+        <span class="id-owner-av">${initials(o)}</span>
+        <span>${escapeHtml(o)}</span>
+      </button>`
+    ).join("");
+  }
+
+  function showIdentity() {
+    renderOwnerChoices();
+    els.identityOverlay.classList.add("open");
+    els.identityOverlay.setAttribute("aria-hidden", "false");
+  }
+  function hideIdentity() {
+    els.identityOverlay.classList.remove("open");
+    els.identityOverlay.setAttribute("aria-hidden", "true");
+  }
+  function chooseUser(name) {
+    currentUser = name;
+    localStorage.setItem(STORAGE_USER, name);
+    updateIdentityChip();
+    hideIdentity();
+    renderAll();
+    toast("Editas como: " + name);
+  }
+  function updateIdentityChip() {
+    els.identityAvatar.textContent = initials(currentUser);
+    els.identityName.textContent = currentUser || "¿Quién eres?";
+  }
+
+  /* ============================================================
+     Banner de conexión
+     ============================================================ */
+  function showBanner(msg) {
+    els.connBanner.textContent = msg;
+    els.connBanner.hidden = false;
+  }
+  function hideBanner() { els.connBanner.hidden = true; }
+
+  /* ============================================================
      Render — header / stats
      ============================================================ */
   function renderStats() {
-    const changed = changedDeals();
-    els.changeCount.textContent = changed.length;
-    els.statChanges.classList.toggle("changed", changed.length > 0);
+    const n = changedDeals().length;
+    els.changeCount.textContent = n;
+    els.statChanges.classList.toggle("changed", n > 0);
 
-    // "En juego" = suma de montos de negocios activos (no perdidos)
     const total = deals
       .filter((d) => d.status !== "perdido")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
     els.totalAmount.textContent = fmtMoney(total);
 
-    const n = changed.length;
     els.exportFab.hidden = n === 0;
     els.fabCount.textContent = n;
   }
@@ -172,7 +227,7 @@
      Render — filtros
      ============================================================ */
   function renderOwnerFilter() {
-    const owners = [...new Set(deals.map((d) => d.owner))].sort();
+    const owners = [...new Set(deals.map((d) => d.owner))].filter(Boolean).sort();
     els.ownerFilter.innerHTML =
       '<option value="">Todos los dueños</option>' +
       owners.map((o) => `<option value="${escapeAttr(o)}">${escapeHtml(o)}</option>`).join("");
@@ -214,12 +269,16 @@
     const st = stageById[d.stage] || { label: d.stage, bg: "#DCD7FF", text: "#1D0446" };
     const changed = isChanged(d) ? " is-changed" : "";
     const lost = d.status === "perdido";
+    const locked = !isEditable(d);
     const badge = lost
       ? `<span class="badge lost">Perdido</span>`
       : `<span class="badge" style="background:${st.bg};color:${st.text}">${escapeHtml(st.label)}</span>`;
+    const lock = locked
+      ? `<span class="lock" title="Solo lectura — pertenece a ${escapeAttr(d.owner)}">🔒</span>`
+      : "";
 
     return `
-      <button class="deal-card${changed}${lost ? " is-lost" : ""}" data-id="${d.id}">
+      <button class="deal-card${changed}${lost ? " is-lost" : ""}${locked ? " is-locked" : ""}" data-id="${d.id}">
         <div>
           <div class="deal-org">${escapeHtml(d.org)}</div>
           <div class="deal-title">${escapeHtml(d.title)}</div>
@@ -229,24 +288,26 @@
           ${badge}
           <span class="deal-amount">${fmtMoney(d.amount)}</span>
           <span class="deal-prob">${probText(d.prob)}</span>
+          ${lock}
         </div>
       </button>`;
   }
 
   /* ============================================================
-     Detalle / edición (pantalla 02 + 03)
+     Detalle / edición
      ============================================================ */
   function openDetail(id) {
     const d = deals.find((x) => x.id === id);
     if (!d) return;
     editingId = id;
     draft = { ...d };
+    draftEditable = isEditable(d);
 
     els.dOrg.textContent = d.org;
     els.dTitle.textContent = d.title;
 
-    // tags read-only
     const tags = [
+      ["Propietario", d.owner],
       ["Vertical", d.vertical],
       ["Cliente", d.clientType],
       ["Industria", d.industry],
@@ -256,7 +317,6 @@
       .map(([k, v]) => `<span class="tag"><span class="k">${k}:</span> ${escapeHtml(v)}</span>`)
       .join("");
 
-    // selector visual de etapa
     els.stageGrid.innerHTML = STAGES.map((s) =>
       `<button class="stage-opt" data-stage="${s.id}"
         style="background:${s.bg};color:${s.text}"
@@ -268,15 +328,32 @@
     updateProbLabel(draft.prob);
     els.commentInput.value = draft.comment || "";
 
-    // bloque perdido
     setLostUI(draft.status === "perdido");
     renderReasonChips();
     els.lossError.classList.remove("show");
 
+    setReadonlyUI(!draftEditable, d.owner);
     refreshSaveState();
     els.detail.classList.add("open");
     els.detail.setAttribute("aria-hidden", "false");
-    document.getElementById("detailBody").scrollTop = 0;
+    els.detailBody.scrollTop = 0;
+  }
+
+  // Aplica el modo solo-lectura cuando el negocio no es del usuario actual.
+  function setReadonlyUI(readonly, owner) {
+    els.detail.classList.toggle("is-readonly", readonly);
+    els.amountInput.disabled = readonly;
+    els.probInput.disabled = readonly;
+    els.commentInput.disabled = readonly;
+    els.lostSwitch.disabled = readonly;
+    if (readonly) {
+      els.readonlyNotice.hidden = false;
+      els.readonlyNotice.textContent = currentUser
+        ? `Solo lectura — este negocio es de ${owner}. Solo editas los tuyos.`
+        : "Solo lectura — elige quién eres para editar tus negocios.";
+    } else {
+      els.readonlyNotice.hidden = true;
+    }
   }
 
   function closeDetail() {
@@ -284,6 +361,7 @@
     els.detail.setAttribute("aria-hidden", "true");
     editingId = null;
     draft = null;
+    draftEditable = false;
   }
 
   function updateProbLabel(p) {
@@ -308,9 +386,9 @@
     ).join("");
   }
 
-  // Criterio 2: marcar perdido exige motivo; sin él, se bloquea el guardado.
+  // Marcar perdido exige motivo; sin él, se bloquea el guardado.
   function canSave() {
-    if (!draft) return false;
+    if (!draft || !draftEditable) return false;
     if (draft.status === "perdido" && !draft.lossReason) return false;
     return true;
   }
@@ -318,25 +396,50 @@
     els.saveBtn.disabled = !canSave();
   }
 
-  function saveDraft() {
-    if (!canSave()) {
-      els.lossError.classList.add("show");
-      return;
+  async function saveDraft() {
+    if (!draftEditable) return;
+    if (!canSave()) { els.lossError.classList.add("show"); return; }
+    if (draft.status !== "perdido") draft.lossReason = "";
+    const id = editingId;
+    try {
+      if (mode === "supabase") {
+        const updated = await SupaDeals.updateDeal(id, draft);
+        applyDeal(updated);
+        lastWrite = { id: id, t: Date.now() };
+      } else {
+        const idx = deals.findIndex((x) => x.id === id);
+        if (idx >= 0) { deals[idx] = { ...deals[idx], ...draft }; saveDemoOverride(deals[idx]); }
+      }
+      pendingIds.add(id);
+      savePending();
+      closeDetail();
+      renderAll();
+      toast("Guardado");
+    } catch (e) {
+      console.error("Error al guardar en Supabase:", e);
+      toast("No se pudo guardar. Revisa tu conexión.");
     }
-    const idx = deals.findIndex((x) => x.id === editingId);
-    if (idx >= 0) {
-      // si deja de estar perdido, limpiar motivo
-      if (draft.status !== "perdido") draft.lossReason = "";
-      deals[idx] = { ...draft };
-      persist();
-    }
-    closeDetail();
-    renderAll();
-    toast("Cambios guardados");
   }
 
   /* ============================================================
-     Bottom sheet — exportar (pantalla 04)
+     Realtime — cambios de otros partners
+     ============================================================ */
+  function onRealtime(type, deal, oldId) {
+    if (type === "DELETE") {
+      deals = deals.filter((d) => d.id !== oldId);
+      pendingIds.delete(oldId);
+    } else if (deal) {
+      applyDeal(deal);
+    }
+    renderAll();
+    // refrescar el filtro de dueños por si entró un propietario nuevo
+    renderOwnerFilter();
+    const mine = deal && lastWrite.id === deal.id && (Date.now() - lastWrite.t < 2500);
+    if (deal && !mine) toast("Pipeline actualizado");
+  }
+
+  /* ============================================================
+     Bottom sheet — exportar
      ============================================================ */
   function openSheet() {
     renderSheet();
@@ -353,7 +456,7 @@
   function renderSheet() {
     const changed = changedDeals();
     els.sheetSub.textContent =
-      changed.length + (changed.length === 1 ? " negocio modificado" : " negocios modificados");
+      changed.length + (changed.length === 1 ? " negocio modificado por ti" : " negocios modificados por ti");
     els.sheetList.innerHTML = changed.map((d) => {
       const st = stageById[d.stage];
       const etapa = d.status === "perdido"
@@ -368,9 +471,6 @@
     }).join("") || '<div class="empty">No hay cambios para exportar.</div>';
   }
 
-  /* ---------- resumen de texto (WhatsApp) ----------
-     {org} – {title} | Etapa: {etapa o "PERDIDO (motivo)"} | Monto: {n} | Prob: {n%} | Comentario: {texto}
-  */
   function buildSummary() {
     return changedDeals().map((d) => {
       const st = stageById[d.stage];
@@ -397,10 +497,7 @@
     document.body.removeChild(ta);
   }
 
-  /* ---------- CSV (UTF-8 con BOM) ----------
-     Columnas: Organización · Título · Propietario · Etapa · Monto ·
-     Probabilidad · Comentario · Estado · Motivo de pérdida
-  */
+  /* ---------- CSV (UTF-8 con BOM) ---------- */
   function downloadCsv() {
     const changed = changedDeals();
     if (!changed.length) { toast("No hay cambios"); return; }
@@ -408,19 +505,12 @@
     const rows = changed.map((d) => {
       const st = stageById[d.stage];
       return [
-        d.org,
-        d.title,
-        d.owner,
-        st ? st.label : d.stage,
-        d.amount,
-        d.prob === null ? "" : d.prob,
-        d.comment,
-        d.status,
-        d.lossReason,
+        d.org, d.title, d.owner, st ? st.label : d.stage,
+        d.amount, d.prob === null ? "" : d.prob, d.comment, d.status, d.lossReason,
       ];
     });
     const csv = [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }); // BOM
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -434,109 +524,33 @@
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
-  /* ---------- reiniciar (criterio 5) ---------- */
-  function resetChanges() {
-    if (!changedDeals().length) { toast("Nada que reiniciar"); return; }
-    if (!confirm("¿Reiniciar todos los cambios a su estado original?")) return;
-    deals = deals.map((d) => {
-      const o = original[d.id];
-      return o ? { ...d, ...o } : d;
-    });
-    persist();
+  // Vacía la lista de exportación (NO toca Supabase).
+  function clearPending() {
+    if (!pendingIds.size) { toast("Lista vacía"); return; }
+    if (!confirm("¿Vaciar tu lista de cambios para exportar?\n(No borra nada en Supabase, solo limpia esta lista local.)")) return;
+    pendingIds.clear();
+    savePending();
     closeSheet();
     renderAll();
-    toast("Cambios reiniciados");
+    toast("Lista vaciada");
   }
 
   /* ============================================================
-     Import CSV de Pipedrive (PapaParse)
-     ============================================================ */
-  // Mapeo flexible de cabeceras comunes de Pipedrive → modelo
-  const HEADER_MAP = {
-    org: ["organización","organizacion","organization","org","empresa","cliente"],
-    title: ["título","titulo","title","deal","negocio","nombre del trato","nombre"],
-    owner: ["propietario","owner","dueño","dueno","gerente","responsable"],
-    stage: ["etapa","stage","fase"],
-    amount: ["monto","amount","valor","value","importe"],
-    prob: ["probabilidad","probability","prob"],
-    vertical: ["vertical"],
-    clientType: ["tipo de cliente","clienttype","client type"],
-    industry: ["industria","industry","sector"],
-    source: ["origen","source","lead source","fuente"],
-    closeDate: ["fecha de cierre","closedate","close date","cierre esperado"],
-  };
-  const stageByLabel = Object.fromEntries(STAGES.map((s) => [s.label.toLowerCase(), s.id]));
-
-  function pickField(rowKeys, lowerRow, candidates) {
-    for (const c of candidates) {
-      const k = rowKeys.find((rk) => rk.trim().toLowerCase() === c);
-      if (k) return lowerRow[k.trim().toLowerCase()];
-    }
-    return "";
-  }
-
-  function importCsv(file) {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const imported = res.data.map((raw, i) => {
-          const lowerRow = {};
-          Object.keys(raw).forEach((k) => { lowerRow[k.trim().toLowerCase()] = raw[k]; });
-          const keys = Object.keys(raw);
-          const stageRaw = String(pickField(keys, lowerRow, HEADER_MAP.stage) || "").trim().toLowerCase();
-          const stageId = stageById[stageRaw] ? stageRaw : (stageByLabel[stageRaw] || "target");
-          const probRaw = pickField(keys, lowerRow, HEADER_MAP.prob);
-          return normalize({
-            id: i + 1,
-            org: pickField(keys, lowerRow, HEADER_MAP.org),
-            title: pickField(keys, lowerRow, HEADER_MAP.title),
-            owner: pickField(keys, lowerRow, HEADER_MAP.owner),
-            stage: stageId,
-            amount: String(pickField(keys, lowerRow, HEADER_MAP.amount) || "").replace(/[^\d.-]/g, ""),
-            prob: probRaw === "" || probRaw == null ? null : probRaw,
-            vertical: pickField(keys, lowerRow, HEADER_MAP.vertical),
-            clientType: pickField(keys, lowerRow, HEADER_MAP.clientType),
-            industry: pickField(keys, lowerRow, HEADER_MAP.industry),
-            source: pickField(keys, lowerRow, HEADER_MAP.source),
-            closeDate: pickField(keys, lowerRow, HEADER_MAP.closeDate),
-          });
-        }).filter((d) => d.org || d.title);
-
-        if (!imported.length) { toast("CSV sin filas válidas"); return; }
-        seedFrom(imported);
-        filters = { owner: "", stage: "", text: "", showLost: false };
-        els.search.value = "";
-        renderAll();
-        toast(`${imported.length} negocios importados`);
-      },
-      error: () => toast("Error al leer el CSV"),
-    });
-  }
-
-  /* ============================================================
-     Toast
+     Toast / escape
      ============================================================ */
   let toastTimer = null;
   function toast(msg) {
     els.toast.textContent = msg;
     els.toast.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2000);
+    toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2200);
   }
-
-  /* ============================================================
-     Escape helpers
-     ============================================================ */
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
   function escapeAttr(s) { return escapeHtml(s); }
 
-  /* ============================================================
-     Render maestro
-     ============================================================ */
   function renderAll() {
     renderStats();
     renderList();
@@ -546,13 +560,11 @@
      Eventos
      ============================================================ */
   function bindEvents() {
-    // lista → abrir detalle
     els.list.addEventListener("click", (e) => {
       const card = e.target.closest(".deal-card");
       if (card) openDetail(Number(card.dataset.id));
     });
 
-    // filtros
     els.search.addEventListener("input", (e) => { filters.text = e.target.value; renderList(); });
     els.ownerFilter.addEventListener("change", (e) => { filters.owner = e.target.value; renderList(); });
     els.stageChips.addEventListener("click", (e) => {
@@ -569,36 +581,46 @@
       renderList();
     });
 
-    // detalle: etapa
+    // identidad
+    els.identityChip.addEventListener("click", showIdentity);
+    els.ownerList.addEventListener("click", (e) => {
+      const b = e.target.closest(".id-owner");
+      if (b) chooseUser(b.dataset.owner);
+    });
+
+    // detalle: etapa (solo si editable)
     els.stageGrid.addEventListener("click", (e) => {
+      if (!draftEditable) return;
       const opt = e.target.closest(".stage-opt");
       if (!opt) return;
       draft.stage = opt.dataset.stage;
       els.stageGrid.querySelectorAll(".stage-opt").forEach((b) =>
         b.setAttribute("aria-pressed", b.dataset.stage === draft.stage ? "true" : "false"));
     });
-    // detalle: campos
     els.amountInput.addEventListener("input", (e) => {
-      draft.amount = Number(e.target.value) || 0;
+      if (draftEditable) draft.amount = Number(e.target.value) || 0;
     });
     els.probInput.addEventListener("input", (e) => {
+      if (!draftEditable) return;
       draft.prob = Number(e.target.value);
       updateProbLabel(draft.prob);
     });
-    els.commentInput.addEventListener("input", (e) => { draft.comment = e.target.value; });
+    els.commentInput.addEventListener("input", (e) => {
+      if (draftEditable) draft.comment = e.target.value;
+    });
 
-    // detalle: perdido
     els.lostSwitch.addEventListener("click", () => {
+      if (!draftEditable) return;
       const nowLost = els.lostSwitch.getAttribute("aria-pressed") !== "true";
       draft.status = nowLost ? "perdido" : "activo";
-      if (!nowLost) { draft.lossReason = ""; }
+      if (!nowLost) draft.lossReason = "";
       setLostUI(nowLost);
       renderReasonChips();
-      // Criterio 2: al marcar perdido sin motivo, mostrar el error visible y bloquear guardado.
       els.lossError.classList.toggle("show", nowLost && !draft.lossReason);
       refreshSaveState();
     });
     els.reasonChips.addEventListener("click", (e) => {
+      if (!draftEditable) return;
       const chip = e.target.closest(".reason-chip");
       if (!chip) return;
       draft.lossReason = chip.dataset.reason;
@@ -612,38 +634,60 @@
     els.cancelBtn.addEventListener("click", closeDetail);
     els.backBtn.addEventListener("click", closeDetail);
 
-    // sheet
     els.exportFab.addEventListener("click", openSheet);
     els.scrim.addEventListener("click", closeSheet);
     els.copyBtn.addEventListener("click", copySummary);
     els.csvBtn.addEventListener("click", downloadCsv);
-    els.resetBtn.addEventListener("click", resetChanges);
+    els.resetBtn.addEventListener("click", clearPending);
 
-    // import
-    els.importBtn.addEventListener("click", () => els.csvInput.click());
-    els.csvInput.addEventListener("change", (e) => {
-      const f = e.target.files[0];
-      if (f) importCsv(f);
-      e.target.value = "";
-    });
-
-    // esc cierra capas
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if (els.sheet.classList.contains("open")) closeSheet();
+      if (els.identityOverlay.classList.contains("open")) { if (currentUser) hideIdentity(); }
+      else if (els.sheet.classList.contains("open")) closeSheet();
       else if (els.detail.classList.contains("open")) closeDetail();
     });
   }
 
   /* ============================================================
-     Init
+     Arranque
      ============================================================ */
-  function init() {
-    load();
+  async function boot() {
+    let connected = false;
+    try { connected = await SupaDeals.init(); } catch (e) { console.error(e); }
+
+    if (connected) {
+      try {
+        deals = await SupaDeals.fetchAll();
+        mode = "supabase";
+        SupaDeals.subscribe(onRealtime);
+        hideBanner();
+      } catch (e) {
+        console.error("Error leyendo Supabase:", e);
+        deals = seedDemoDeals();
+        mode = "demo";
+        showBanner("No se pudo leer Supabase. Mostrando datos locales (modo demo).");
+      }
+    } else {
+      deals = seedDemoDeals();
+      mode = "demo";
+      showBanner("Modo demo (sin Supabase). Configura las variables de entorno para datos compartidos.");
+    }
+
+    // limpiar pendientes que ya no existen
+    const validIds = new Set(deals.map((d) => d.id));
+    [...pendingIds].forEach((id) => { if (!validIds.has(id)) pendingIds.delete(id); });
+    savePending();
+
     renderOwnerFilter();
-    renderStageChips();
     renderAll();
+  }
+
+  async function init() {
+    renderStageChips();
     bindEvents();
+    updateIdentityChip();
+    await boot();
+    if (!currentUser) showIdentity();
   }
 
   document.addEventListener("DOMContentLoaded", init);

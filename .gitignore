@@ -1,6 +1,10 @@
 # Permisos/ajustes locales de Claude Code (específicos de la máquina)
 .claude/settings.local.json
 
+# Config local de Supabase (claves) — en prod va por variables de entorno
+apps/pipeline/config.js
+config.js
+
 # Dependencias / build (por si más adelante se agrega tooling)
 node_modules/
 dist/

@@ -29,9 +29,9 @@
     <header class="app-header">
       <div class="brand-row">
         <div class="wordmark">mambo<span>·pipeline</span></div>
-        <input type="file" id="csvInput" accept=".csv" class="sr-only" />
-        <button class="icon-btn" id="importBtn" title="Importar CSV de Pipedrive" aria-label="Importar CSV">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <button class="identity-chip" id="identityChip" title="Cambiar de partner" aria-label="Cambiar de partner">
+          <span class="identity-avatar" id="identityAvatar">··</span>
+          <span class="identity-name" id="identityName">¿Quién eres?</span>
         </button>
       </div>
       <div class="header-stats">
@@ -45,6 +45,9 @@
         </div>
       </div>
     </header>
+
+    <!-- aviso de conexión (modo demo / error) -->
+    <div class="conn-banner" id="connBanner" hidden></div>
 
     <!-- ===== FILTROS ===== -->
     <section class="filters">
@@ -87,6 +90,9 @@
     </header>
 
     <div class="detail-body" id="detailBody">
+      <!-- aviso de solo lectura (negocio de otro partner) -->
+      <div class="readonly-notice" id="readonlyNotice" hidden></div>
+
       <!-- tags read-only -->
       <div>
         <div class="section-label">Ficha del negocio</div>
@@ -162,11 +168,21 @@
     </div>
   </section>
 
+  <!-- ===== ¿QUIÉN ERES? (selector de partner) ===== -->
+  <div class="id-overlay" id="identityOverlay" aria-hidden="true">
+    <div class="id-card">
+      <div class="id-title">¿Quién eres?</div>
+      <div class="id-sub">Verás todos los negocios del equipo. Solo podrás editar los tuyos.</div>
+      <div class="id-owners" id="ownerList" role="group" aria-label="Selecciona tu nombre"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
-  <!-- PapaParse para importar el CSV real de Pipedrive -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Cliente oficial de Supabase (base de datos compartida, tiempo real) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="data.js"></script>
+  <script src="supabase.js"></script>
   <script src="app.js"></script>
 
   <!-- Registro del service worker (carga rápida + offline básico) -->

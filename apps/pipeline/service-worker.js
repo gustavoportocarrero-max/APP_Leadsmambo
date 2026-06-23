@@ -7,7 +7,7 @@
      - cross-origin (fonts, PapaParse) → network, runtime-cache best-effort
    ============================================================ */
 
-const CACHE = "mambo-pipeline-v2";
+const CACHE = "mambo-pipeline-v3";
 
 // Archivos locales que componen el "app shell".
 const PRECACHE = [
@@ -16,6 +16,7 @@ const PRECACHE = [
   "/styles.css",
   "/colors_and_type.css",
   "/data.js",
+  "/supabase.js",
   "/app.js",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -47,6 +48,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   const sameOrigin = url.origin === self.location.origin;
+
+  // Nunca cachear: datos en vivo de Supabase ni el endpoint de config.
+  // (Realtime usa websockets, que no pasan por aquí.)
+  if (url.hostname.endsWith("supabase.co") || (sameOrigin && url.pathname.startsWith("/api/"))) {
+    return; // deja pasar a la red directamente
+  }
 
   // Navegaciones (cargar la app): network-first, fallback al shell offline.
   if (req.mode === "navigate") {

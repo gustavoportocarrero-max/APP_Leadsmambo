@@ -5,19 +5,25 @@ pipeline en segundos, con una mano, desde el celular. Reemplaza la fricción de 
 en Pipedrive/CRM de escritorio.
 
 Construida según el handoff técnico (PRD): foundations de marca, especificación
-funcional y modelo de datos. Sin backend — persistencia en `localStorage`.
+funcional y modelo de datos. **Fuente de verdad: Supabase** (base compartida en tiempo
+real). Sin login: cada partner elige quién es y solo edita sus negocios.
 
 ## Estructura
 
 ```
 apps/pipeline/
-├── index.html              # estructura de la app (pantallas 01–04)
+├── index.html              # estructura de la app (pantallas 01–04 + ¿quién eres?)
 ├── styles.css              # estilos de la app (importa colors_and_type.css)
 ├── colors_and_type.css     # foundations de marca: color, tipografía, tokens
-├── data.js                 # datos de arranque (131 negocios, ver SEED_DEALS) + catálogos
-├── app.js                  # lógica: filtros, edición, perdido, export, import CSV
+├── data.js                 # SEED_DEALS (fallback/demo) + catálogos + OWNERS
+├── supabase.js             # capa de datos: config, lectura, escritura, realtime
+├── app.js                  # lógica: filtros, edición, perdido, export, identidad
+├── api/config.js           # serverless (Vercel): entrega URL+anon key desde env vars
+├── config.example.js       # template de config local (opcional, NO se sube)
+├── db/schema.sql           # DDL: tabla deals + updated_at + RLS + realtime
+├── db/seed.sql             # carga inicial: 131 negocios (pegar en Supabase)
 ├── manifest.webmanifest    # PWA: nombre, íconos, display standalone, colores
-├── service-worker.js       # PWA: precache del app shell + offline básico
+├── service-worker.js       # PWA: precache del shell (no cachea Supabase ni /api)
 ├── icons/                  # íconos PWA (192, 512, 512-maskable, apple-touch 180)
 └── vercel.json             # config de deploy estático
 ```
@@ -50,27 +56,36 @@ Luego abrir <http://localhost:4321>. En el repo se incluye además
 `.claude/static-server.ps1` (servidor estático en PowerShell, sin dependencias) usado
 para el preview en Windows.
 
-## Datos de arranque (`data.js`)
+## Base de datos (Supabase)
 
-La app lee los negocios al iniciar desde `data.js` (`SEED_DEALS`), que se carga con
-`<script src="data.js">`. **No hay CSV empaquetado ni build**: `data.js` ES la fuente
-de datos. Actualmente contiene **131 negocios** generados desde el export de Pipedrive
-`Segunda base de datos app pipeline mambo.csv`.
+La fuente de verdad es una tabla `deals` en **Supabase**. La app la lee al iniciar,
+escribe cada cambio y usa **Supabase Realtime** para reflejar en vivo lo que guardan
+otros partners. `data.js` (`SEED_DEALS`) queda solo como **fallback "modo demo"** (si
+Supabase no está configurado) y como base para generar `db/seed.sql`.
 
-`SEED_VERSION` marca la versión de estos datos. Al cambiarla, la app descarta el
-`localStorage` viejo y recarga `SEED_DEALS` (así un refresco de base de datos se
-propaga a los usuarios que ya abrieron la app). El service worker también sube de
-versión (`mambo-pipeline-vN`) para que no quede `data.js` cacheado.
+**Sin login.** La app usa la *clave anónima* (pública por diseño) y políticas RLS que
+permiten leer/escribir a cualquiera con esa clave. La regla "cada partner solo edita
+lo suyo" es una **barrera de interfaz, no seguridad real**. Suficiente para un piloto
+interno; si luego se quiere seguridad real, se agrega login.
 
-**Para refrescar los datos** (regenerar `data.js` desde un CSV nuevo de Pipedrive):
-mapear las columnas `Negocio - Organización/Título/Valor del negocio/Propietario/
-Estado/Fuente lead/Fecha de cierre prevista/Probabilidad/Vertical/Etapa/Tipo de
-cliente` y `Organización - Industria` al modelo, asignar `id` correlativo, y subir
-`SEED_VERSION` + la versión del cache del SW.
+### Configuración (sin claves en el código)
 
-> El botón **importar** (icono arriba a la derecha) sigue disponible para cargar un
-> CSV de Pipedrive en runtime (vía **PapaParse**), pero eso solo afecta `localStorage`
-> en ese dispositivo — no cambia los datos empaquetados.
+- En producción, la URL y la anon key se entregan al cliente vía la función serverless
+  `api/config.js`, que las lee de las **variables de entorno de Vercel**. Nada de claves
+  en el repo.
+- En local (opcional), copia `config.example.js` → `config.js` (ignorado por git).
+
+### Identidad y permisos
+
+- Al abrir, la app pide **"¿Quién eres?"** y guarda la elección en `localStorage`.
+- Todos ven todos los negocios; cada quien solo **edita los suyos** (los demás salen en
+  solo lectura, con candado 🔒). Se puede cambiar de partner tocando el chip del header.
+
+### Exportar (llenado manual en Pipedrive)
+
+Los botones **Copiar resumen** y **Descargar CSV** siguen ahí: arman la lista de los
+negocios que *tú* editaste en esta sesión, para facilitar el traspaso a Pipedrive.
+"Vaciar lista" solo limpia esa lista local (no borra nada en Supabase).
 
 ## PWA — instalable en iPhone y Android
 
@@ -94,9 +109,51 @@ del manifest/íconos/SW son absolutas (`/manifest.webmanifest`, `/icons/…`,
 > (`apps/pipeline/`) en lugar de una carpeta `public/` — equivalen a lo mismo en un
 > sitio sin bundler.
 
+## Puesta en marcha (pasos manuales)
+
+### A) En Supabase (una vez)
+1. Crea un proyecto en <https://supabase.com>.
+2. **SQL Editor → New query** → pega y corre `db/schema.sql` (crea la tabla, el
+   `updated_at` automático, las políticas RLS y activa Realtime).
+3. **SQL Editor → New query** → pega y corre `db/seed.sql` (carga los 131 negocios).
+4. **Project Settings → API** → copia el **Project URL** y la **anon public key**.
+
+### B) En Vercel (una vez)
+En el proyecto → **Settings → Environment Variables**, crea estas dos (para
+Production y Preview):
+
+| Nombre              | Valor                          |
+|---------------------|--------------------------------|
+| `SUPABASE_URL`      | el Project URL de Supabase     |
+| `SUPABASE_ANON_KEY` | la anon public key de Supabase |
+
+Luego **Deployments → Redeploy**. (Mantén **Root Directory = `apps/pipeline`**.)
+
+> No llevan prefijo `NEXT_PUBLIC_`/`VITE_` porque no hay framework: las lee la función
+> `api/config.js` del lado del servidor y se las pasa al cliente. **Nunca** pongas aquí
+> la `service_role` key.
+
+## Agregar negocios nuevos desde Pipedrive (a futuro)
+
+Ahora la fuente de verdad es Supabase. Para sumar negocios nuevos (en pasos simples):
+
+1. En Pipedrive, exporta los negocios a **CSV** (como hiciste antes).
+2. Entra a tu proyecto de Supabase → menú **Table Editor** → tabla **`deals`**.
+3. Botón **Insert → Import data from CSV** y sube tu archivo.
+4. Asocia cada columna del CSV con la columna de la tabla (organización→`org`,
+   título→`title`, valor→`amount`, propietario→`owner`, etapa→`stage`, etc.).
+   - En `stage` usa el id corto: `target`, `primera`, `contacto`, `propuesta`,
+     `cierre`, `nurturing`.
+5. Confirma. Listo: los negocios aparecen para todos, y si alguien tiene la app
+   abierta los verá entrar en vivo.
+
+> Alternativa rápida para una sola fila: en **Table Editor → Insert → Insert row**,
+> llenas los campos a mano y guardas.
+
 ## Deploy
 
-Estático + cliente. Sugerido: **Vercel** con **Root Directory = `apps/pipeline`**.
+Estático + cliente. **Vercel** con **Root Directory = `apps/pipeline`** y las dos
+variables de entorno de arriba.
 
 ```bash
 cd apps/pipeline

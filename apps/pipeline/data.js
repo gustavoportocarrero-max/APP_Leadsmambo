@@ -2254,6 +2254,17 @@ const LOSS_REASONS = [
 
 const SEED_VERSION = "2026-06-22-segunda-base";
 
+// Partners del piloto. La lista del selector "¿Quién eres?" es la unión de estos
+// con los propietarios que existan en los datos cargados (por si aparece alguno nuevo).
+const OWNERS = [
+  "Nicolás Aramburú",
+  "Renzo Duarte",
+  "Cristina Mc",
+  "Guillermo Solano",
+  "Mauricio",
+  "Topless"
+];
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SEED_DEALS, STAGES, LOSS_REASONS, SEED_VERSION };
+  module.exports = { SEED_DEALS, STAGES, LOSS_REASONS, SEED_VERSION, OWNERS };
 }
