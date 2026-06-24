@@ -2247,13 +2247,11 @@ const STAGES = [
   { id: "nurturing", label: "Nurturing",                 bg: "#DCD7FF", text: "#1D0446" }
 ];
 
+// Motivos de pérdida: EXACTOS (se envían a Pipedrive como lost_reason tal cual).
 const LOSS_REASONS = [
-  "Precio / presupuesto",
-  "Eligió a un competidor",
-  "No es el momento",
-  "Sin respuesta / se enfrió",
-  "Cambio de prioridades",
-  "No calificaba (mal fit)"
+  "Escogieron otro proveedor",
+  "Desinterés (dejaron de contestar)",
+  "Falta de presupuesto"
 ];
 
 const SEED_VERSION = "2026-06-22-segunda-base";

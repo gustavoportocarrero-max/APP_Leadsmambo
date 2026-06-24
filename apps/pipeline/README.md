@@ -150,6 +150,46 @@ Ahora la fuente de verdad es Supabase. Para sumar negocios nuevos (en pasos simp
 > Alternativa rápida para una sola fila: en **Table Editor → Insert → Insert row**,
 > llenas los campos a mano y guardas.
 
+## Sincronización con Pipedrive (una vía: app → Pipedrive)
+
+Al guardar un cambio, la app escribe en Pipedrive vía la función serverless
+`api/pipedrive-sync.js` (el token vive solo en el servidor, nunca en el navegador).
+
+- **Solo pipeline 1.** Antes de escribir, valida (GET) que el deal pertenezca al
+  `pipeline_id = 1`; si no, no escribe y lo registra.
+- **Solo deals con `pipedrive_id`.** Los que no lo tienen se guardan en la app pero
+  no se sincronizan, y se marcan con ⚠ "sin Pipedrive".
+- **Solo campos que cambiaron** (etapa→`stage_id`, monto→`value`, prob→`probability`,
+  ganado→`status:won`, perdido→`status:lost`+`lost_reason`).
+- **Pipedrive primero, luego la app**: si Pipedrive rechaza, no se guarda en la app
+  (no quedan estados contradictorios). Cada intento se registra (Vercel → Logs).
+
+Mapeo de etapas (app → `stage_id` de Pipedrive, pipeline 1):
+
+| App                       | stage_id |
+|---------------------------|----------|
+| Target                    | 1        |
+| Contacto establecido      | 2        |
+| Primera reunión           | 16       |
+| Presentación de propuesta | 52       |
+| Follow-up y cierre        | 55       |
+| Nurturing                 | 11       |
+
+### Variables de entorno en Vercel
+| Nombre | Para qué |
+|---|---|
+| `PIPEDRIVE_API_TOKEN` | token de API (ya creado) |
+| `PIPEDRIVE_TEST_DEAL_IDS` | (prueba) IDs separados por coma que SÍ se escriben de verdad; el resto se simula |
+| `PIPEDRIVE_SYNC_ENABLED` | `true` = escribir de verdad para TODOS (solo si NO hay TEST_DEAL_IDS) |
+
+Sin las dos últimas → **todo se simula** (dry-run), no escribe nada. Modo seguro por defecto.
+
+### Resultado del negocio
+- **Perdido**: disponible en todas las etapas; exige uno de 3 motivos exactos
+  ("Escogieron otro proveedor", "Desinterés (dejaron de contestar)",
+  "Falta de presupuesto") que se envían como `lost_reason`.
+- **Ganado**: solo desde "Presentación de propuesta" en adelante; envía `status:won`.
+
 ## Deploy
 
 Estático + cliente. **Vercel** con **Root Directory = `apps/pipeline`** y las dos

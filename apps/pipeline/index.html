@@ -92,6 +92,8 @@
     <div class="detail-body" id="detailBody">
       <!-- aviso de solo lectura (negocio de otro partner) -->
       <div class="readonly-notice" id="readonlyNotice" hidden></div>
+      <!-- aviso: negocio sin ID de Pipedrive (no se sincroniza) -->
+      <div class="sync-notice" id="syncNotice" hidden></div>
 
       <!-- tags read-only -->
       <div>
@@ -129,12 +131,15 @@
         <textarea id="commentInput" placeholder="Notas para el equipo…"></textarea>
       </div>
 
-      <!-- bloque perdido (pantalla 03) -->
-      <div class="lost-block">
-        <div class="switch-row">
-          <span class="switch-label">Marcar como perdido</span>
-          <button class="switch" id="lostSwitch" aria-pressed="false" aria-label="Marcar perdido"></button>
+      <!-- resultado del negocio: en curso / ganado / perdido -->
+      <div class="result-block">
+        <div class="section-label">Resultado del negocio</div>
+        <div class="result-seg" id="resultSeg" role="group" aria-label="Resultado del negocio">
+          <button class="seg" data-status="activo"  aria-pressed="true">En curso</button>
+          <button class="seg" data-status="ganado"  aria-pressed="false">Ganado</button>
+          <button class="seg" data-status="perdido" aria-pressed="false">Perdido</button>
         </div>
+        <div class="won-hint" id="wonHint" hidden>“Ganado” se habilita desde “Presentación de propuesta” en adelante.</div>
         <div class="loss-reasons hidden" id="lossReasons">
           <div class="section-label" style="margin-top:var(--s-4)">Motivo de pérdida (obligatorio)</div>
           <div class="reason-chips" id="reasonChips" role="group"></div>

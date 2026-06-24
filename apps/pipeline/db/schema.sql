@@ -6,6 +6,7 @@
 -- 1) Tabla de negocios -------------------------------------------------
 create table if not exists public.deals (
   id           bigint generated always as identity primary key,
+  pipedrive_id bigint,                                     -- id del negocio en Pipedrive (NULL = no sincronizable)
   -- editables desde la app
   stage        text    not null default 'target',         -- target|primera|contacto|propuesta|cierre|nurturing
   amount       numeric not null default 0,                 -- valor del negocio (US$)
@@ -30,6 +31,7 @@ create table if not exists public.deals (
 -- Índices útiles para filtrar
 create index if not exists deals_owner_idx on public.deals (owner);
 create index if not exists deals_stage_idx on public.deals (stage);
+create index if not exists deals_pipedrive_idx on public.deals (pipedrive_id);
 
 -- 2) updated_at automático en cada UPDATE ------------------------------
 create or replace function public.set_updated_at()

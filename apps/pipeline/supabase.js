@@ -33,6 +33,7 @@ window.SupaDeals = (function () {
   function rowToDeal(r) {
     return {
       id: r.id,
+      pipedriveId: (r.pipedrive_id === null || r.pipedrive_id === undefined) ? null : r.pipedrive_id,
       org: r.org || "",
       title: r.title || "",
       owner: r.owner || "",

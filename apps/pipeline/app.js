@@ -48,6 +48,7 @@
     detail: $("detail"),
     detailBody: $("detailBody"),
     readonlyNotice: $("readonlyNotice"),
+    syncNotice: $("syncNotice"),
     dOrg: $("dOrg"),
     dTitle: $("dTitle"),
     dTags: $("dTags"),
@@ -56,7 +57,8 @@
     probInput: $("probInput"),
     probVal: $("probVal"),
     commentInput: $("commentInput"),
-    lostSwitch: $("lostSwitch"),
+    resultSeg: $("resultSeg"),
+    wonHint: $("wonHint"),
     lossReasons: $("lossReasons"),
     reasonChips: $("reasonChips"),
     lossError: $("lossError"),
@@ -109,6 +111,7 @@
   function normalize(d) {
     return {
       id: d.id,
+      pipedriveId: (d.pipedriveId === null || d.pipedriveId === undefined) ? null : d.pipedriveId,
       org: d.org || "",
       title: d.title || "",
       owner: d.owner || "",
@@ -214,8 +217,9 @@
     els.changeCount.textContent = n;
     els.statChanges.classList.toggle("changed", n > 0);
 
+    // "En juego" = solo negocios en curso (excluye ganados y perdidos)
     const total = deals
-      .filter((d) => d.status !== "perdido")
+      .filter((d) => d.status === "activo")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
     els.totalAmount.textContent = fmtMoney(total);
 
@@ -269,12 +273,18 @@
     const st = stageById[d.stage] || { label: d.stage, bg: "#DCD7FF", text: "#1D0446" };
     const changed = isChanged(d) ? " is-changed" : "";
     const lost = d.status === "perdido";
+    const won = d.status === "ganado";
     const locked = !isEditable(d);
     const badge = lost
       ? `<span class="badge lost">Perdido</span>`
-      : `<span class="badge" style="background:${st.bg};color:${st.text}">${escapeHtml(st.label)}</span>`;
+      : won
+        ? `<span class="badge won">Ganado</span>`
+        : `<span class="badge" style="background:${st.bg};color:${st.text}">${escapeHtml(st.label)}</span>`;
     const lock = locked
       ? `<span class="lock" title="Solo lectura — pertenece a ${escapeAttr(d.owner)}">🔒</span>`
+      : "";
+    const noPd = !d.pipedriveId
+      ? `<span class="nopd" title="Sin ID de Pipedrive — no se sincroniza">⚠</span>`
       : "";
 
     return `
@@ -288,6 +298,7 @@
           ${badge}
           <span class="deal-amount">${fmtMoney(d.amount)}</span>
           <span class="deal-prob">${probText(d.prob)}</span>
+          ${noPd}
           ${lock}
         </div>
       </button>`;
@@ -328,11 +339,18 @@
     updateProbLabel(draft.prob);
     els.commentInput.value = draft.comment || "";
 
-    setLostUI(draft.status === "perdido");
+    setReadonlyUI(!draftEditable, d.owner);
+    setResultUI();
     renderReasonChips();
     els.lossError.classList.remove("show");
 
-    setReadonlyUI(!draftEditable, d.owner);
+    // aviso si el negocio no tiene ID de Pipedrive (no se sincroniza)
+    if (draftEditable && !draft.pipedriveId) {
+      els.syncNotice.hidden = false;
+      els.syncNotice.textContent = "Sin ID de Pipedrive: los cambios se guardan en la app, pero NO se envían a Pipedrive.";
+    } else {
+      els.syncNotice.hidden = true;
+    }
     refreshSaveState();
     els.detail.classList.add("open");
     els.detail.setAttribute("aria-hidden", "false");
@@ -345,7 +363,7 @@
     els.amountInput.disabled = readonly;
     els.probInput.disabled = readonly;
     els.commentInput.disabled = readonly;
-    els.lostSwitch.disabled = readonly;
+    els.resultSeg.querySelectorAll(".seg").forEach((b) => { b.disabled = readonly; });
     if (readonly) {
       els.readonlyNotice.hidden = false;
       els.readonlyNotice.textContent = currentUser
@@ -374,9 +392,19 @@
     }
   }
 
-  function setLostUI(isLost) {
-    els.lostSwitch.setAttribute("aria-pressed", isLost ? "true" : "false");
-    els.lossReasons.classList.toggle("hidden", !isLost);
+  // "Ganado" solo desde Presentación de propuesta en adelante.
+  function wonAllowed(stageId) {
+    return stageId === "propuesta" || stageId === "cierre";
+  }
+
+  function setResultUI() {
+    els.resultSeg.querySelectorAll(".seg").forEach((b) =>
+      b.setAttribute("aria-pressed", b.dataset.status === draft.status ? "true" : "false"));
+    const wonBtn = els.resultSeg.querySelector('.seg[data-status="ganado"]');
+    const allow = wonAllowed(draft.stage);
+    if (wonBtn) wonBtn.disabled = !allow;
+    els.wonHint.hidden = allow;
+    els.lossReasons.classList.toggle("hidden", draft.status !== "perdido");
   }
 
   function renderReasonChips() {
@@ -386,14 +414,46 @@
     ).join("");
   }
 
-  // Marcar perdido exige motivo; sin él, se bloquea el guardado.
+  // Reglas de guardado:
+  //  - perdido exige motivo
+  //  - ganado solo desde "Presentación de propuesta" en adelante
   function canSave() {
     if (!draft || !draftEditable) return false;
     if (draft.status === "perdido" && !draft.lossReason) return false;
+    if (draft.status === "ganado" && !wonAllowed(draft.stage)) return false;
     return true;
   }
   function refreshSaveState() {
     els.saveBtn.disabled = !canSave();
+  }
+
+  // Campos editables que cambiaron respecto al estado actual (para escribir
+  // SOLO lo que cambió, tanto en Pipedrive como en el resumen).
+  function computeChanges(orig, d) {
+    const c = {};
+    if (d.stage !== orig.stage) c.stage = d.stage;
+    if (d.amount !== orig.amount) c.amount = d.amount;
+    if (d.prob !== orig.prob) c.prob = d.prob;
+    if (d.status !== orig.status) {
+      c.status = d.status;
+      if (d.status === "perdido") c.lossReason = d.lossReason || "";
+    } else if (d.status === "perdido" && d.lossReason !== orig.lossReason) {
+      c.lossReason = d.lossReason || "";
+    }
+    return c;
+  }
+
+  // Escritura server-side a Pipedrive (el token vive en el servidor).
+  async function pushToPipedrive(pipedriveId, changes) {
+    const r = await fetch("/api/pipedrive-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pipedriveId, changes }),
+    });
+    let j = {};
+    try { j = await r.json(); } catch (_) {}
+    if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return j; // { ok, simulated, confirmed, applied }
   }
 
   async function saveDraft() {
@@ -401,6 +461,30 @@
     if (!canSave()) { els.lossError.classList.add("show"); return; }
     if (draft.status !== "perdido") draft.lossReason = "";
     const id = editingId;
+    const orig = deals.find((x) => x.id === id) || {};
+    const changes = computeChanges(orig, draft);
+    if (Object.keys(changes).length === 0) { closeDetail(); return; } // nada cambió
+
+    let syncMsg = "";
+    // 1) Pipedrive PRIMERO (confirmar antes de dar por bueno en la app).
+    if (orig.pipedriveId) {
+      els.saveBtn.disabled = true;
+      try {
+        const r = await pushToPipedrive(orig.pipedriveId, changes);
+        syncMsg = r.simulated
+          ? " · Pipedrive: simulado"
+          : (r.confirmed ? " · enviado a Pipedrive ✓" : " · Pipedrive sin confirmar");
+      } catch (e) {
+        console.error("Pipedrive sync error:", e);
+        toast("No se escribió en Pipedrive: " + e.message + ". No se guardó el cambio.");
+        refreshSaveState();
+        return; // NO tocar Supabase → app y Pipedrive quedan consistentes (sin cambio)
+      }
+    } else {
+      syncMsg = " · sin Pipedrive (falta deal id)";
+    }
+
+    // 2) Guardar en la app (Supabase o demo).
     try {
       if (mode === "supabase") {
         const updated = await SupaDeals.updateDeal(id, draft);
@@ -414,10 +498,11 @@
       savePending();
       closeDetail();
       renderAll();
-      toast("Guardado");
+      toast("Guardado" + syncMsg);
     } catch (e) {
-      console.error("Error al guardar en Supabase:", e);
-      toast("No se pudo guardar. Revisa tu conexión.");
+      console.error("Error al guardar en la app:", e);
+      toast("Se escribió en Pipedrive pero falló guardar en la app. Reintenta.");
+      refreshSaveState();
     }
   }
 
@@ -596,6 +681,10 @@
       draft.stage = opt.dataset.stage;
       els.stageGrid.querySelectorAll(".stage-opt").forEach((b) =>
         b.setAttribute("aria-pressed", b.dataset.stage === draft.stage ? "true" : "false"));
+      // si "ganado" deja de ser válido para la nueva etapa, volver a "en curso"
+      if (draft.status === "ganado" && !wonAllowed(draft.stage)) draft.status = "activo";
+      setResultUI();
+      refreshSaveState();
     });
     els.amountInput.addEventListener("input", (e) => {
       if (draftEditable) draft.amount = Number(e.target.value) || 0;
@@ -609,14 +698,15 @@
       if (draftEditable) draft.comment = e.target.value;
     });
 
-    els.lostSwitch.addEventListener("click", () => {
+    els.resultSeg.addEventListener("click", (e) => {
       if (!draftEditable) return;
-      const nowLost = els.lostSwitch.getAttribute("aria-pressed") !== "true";
-      draft.status = nowLost ? "perdido" : "activo";
-      if (!nowLost) draft.lossReason = "";
-      setLostUI(nowLost);
+      const b = e.target.closest(".seg");
+      if (!b || b.disabled) return;
+      draft.status = b.dataset.status;
+      if (draft.status !== "perdido") draft.lossReason = "";
+      setResultUI();
       renderReasonChips();
-      els.lossError.classList.toggle("show", nowLost && !draft.lossReason);
+      els.lossError.classList.toggle("show", draft.status === "perdido" && !draft.lossReason);
       refreshSaveState();
     });
     els.reasonChips.addEventListener("click", (e) => {
