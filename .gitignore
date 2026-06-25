@@ -5,6 +5,9 @@
 # Solo el config.js en la raíz de la app; NO afecta a api/config.js (serverless).
 /apps/pipeline/config.js
 
+# Datos sensibles de clientes — el seed con negocios reales se queda LOCAL.
+/apps/pipeline/db/seed.sql
+
 # Dependencias / build (por si más adelante se agrega tooling)
 node_modules/
 dist/
