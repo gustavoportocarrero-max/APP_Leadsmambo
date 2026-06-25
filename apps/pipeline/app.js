@@ -464,6 +464,7 @@
     const orig = deals.find((x) => x.id === id) || {};
     const changes = computeChanges(orig, draft);
     if (Object.keys(changes).length === 0) { closeDetail(); return; } // nada cambió
+    console.log("[pipeline] guardar deal", id, "· pipedrive_id:", orig.pipedriveId || "(ninguno)", "· cambios:", changes);
 
     let syncMsg = "";
     // 1) Pipedrive PRIMERO (confirmar antes de dar por bueno en la app).
@@ -471,9 +472,10 @@
       els.saveBtn.disabled = true;
       try {
         const r = await pushToPipedrive(orig.pipedriveId, changes);
+        console.log("[pipeline] respuesta de /api/pipedrive-sync:", r);
         syncMsg = r.simulated
-          ? " · Pipedrive: simulado"
-          : (r.confirmed ? " · enviado a Pipedrive ✓" : " · Pipedrive sin confirmar");
+          ? " · ⚠ SOLO PRUEBA (no se escribió en Pipedrive)"
+          : (r.confirmed ? " · enviado a Pipedrive ✓" : " · ⚠ Pipedrive sin confirmar");
       } catch (e) {
         console.error("Pipedrive sync error:", e);
         toast("No se escribió en Pipedrive: " + e.message + ". No se guardó el cambio.");
@@ -481,7 +483,7 @@
         return; // NO tocar Supabase → app y Pipedrive quedan consistentes (sin cambio)
       }
     } else {
-      syncMsg = " · sin Pipedrive (falta deal id)";
+      syncMsg = " · ⚠ NO se envió a Pipedrive (este negocio no tiene pipedrive_id)";
     }
 
     // 2) Guardar en la app (Supabase o demo).
