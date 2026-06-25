@@ -214,6 +214,7 @@ input, select, textarea { font-family: inherit; }
 .deal-card {
   width: 100%;
   text-align: left;
+  cursor: pointer;
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
@@ -225,8 +226,24 @@ input, select, textarea { font-family: inherit; }
               box-shadow var(--t-fast) var(--ease-snap);
 }
 .deal-card:active { transform: scale(0.985); }
+.deal-card:focus-visible { box-shadow: 0 0 0 3px rgba(29, 4, 70, 0.08); }
 .deal-card.is-pending { box-shadow: inset 3px 0 0 var(--coral); border-color: rgba(250,84,120,0.35); }
 .deal-card.is-lost { opacity: 0.62; }
+
+/* Reintentar sincronización — solo en negocios pendientes */
+.retry-btn {
+  grid-column: 1 / -1;
+  margin-top: var(--s-2);
+  height: 40px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--coral);
+  background: var(--surface-raised);
+  color: var(--coral);
+  font-weight: 800; font-size: 13px;
+  transition: transform var(--t-fast) var(--ease-snap), opacity var(--t-fast);
+}
+.retry-btn:active { transform: scale(0.98); }
+.retry-btn:disabled { opacity: 0.55; cursor: progress; border-style: dashed; }
 
 .deal-org {
   font-size: 12px; font-weight: 700; letter-spacing: 0.02em;

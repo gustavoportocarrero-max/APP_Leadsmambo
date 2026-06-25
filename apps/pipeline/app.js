@@ -10,6 +10,7 @@
 
   const STORAGE_USER = "mambo.pipeline.user";
   const STORAGE_PENDING = "mambo.pipeline.pending";
+  const STORAGE_PENDING_META = "mambo.pipeline.pendingmeta"; // qué quedó sin confirmar por negocio
   const STORAGE_DEMO = "mambo.pipeline.demo"; // overrides locales cuando no hay Supabase
   const stageById = Object.fromEntries(STAGES.map((s) => [s.id, s]));
 
@@ -26,6 +27,8 @@
   // cualquier guardado no confirmado (sin pipedrive_id, monto bloqueado por
   // productos, error de red, modo prueba/dry-run) lo mantiene pendiente.
   let pendingIds = new Set(loadPending());
+  let pendingMeta = loadPendingMeta();     // { [id]: { changes, note } } = lo que falta confirmar
+  const retrying = new Set();              // ids con un reintento en curso (evita doble click)
   let lastWrite = { id: null, t: 0 };      // para no auto-notificar mi propio cambio
 
   /* ---------- DOM refs ---------- */
@@ -79,6 +82,13 @@
   }
   function savePending() {
     localStorage.setItem(STORAGE_PENDING, JSON.stringify([...pendingIds]));
+  }
+  function loadPendingMeta() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_PENDING_META) || "{}"); }
+    catch (_) { return {}; }
+  }
+  function savePendingMeta() {
+    localStorage.setItem(STORAGE_PENDING_META, JSON.stringify(pendingMeta));
   }
 
   // --- Modo demo: persistir ediciones locales (sin Supabase) ---
@@ -281,9 +291,14 @@
     const pendingTag = pending
       ? `<span class="pending-tag" title="Cambio pendiente de confirmar en Pipedrive">⏳ pendiente</span>`
       : "";
+    // Botón de reintento SOLO en pendientes (los ya sincronizados no lo muestran).
+    const isRetrying = retrying.has(d.id);
+    const retryBtn = pending
+      ? `<button class="retry-btn" data-retry="${d.id}"${isRetrying ? " disabled" : ""}>${isRetrying ? "Reintentando…" : "↻ Reintentar sincronización"}</button>`
+      : "";
 
     return `
-      <button class="deal-card${pending ? " is-pending" : ""}${lost ? " is-lost" : ""}${locked ? " is-locked" : ""}" data-id="${d.id}">
+      <div class="deal-card${pending ? " is-pending" : ""}${lost ? " is-lost" : ""}${locked ? " is-locked" : ""}" role="button" tabindex="0" data-id="${d.id}">
         <div>
           <div class="deal-org">${escapeHtml(d.org)}</div>
           <div class="deal-title">${escapeHtml(d.title)}</div>
@@ -297,7 +312,8 @@
           ${noPd}
           ${lock}
         </div>
-      </button>`;
+        ${retryBtn}
+      </div>`;
   }
 
   /* ============================================================
@@ -450,7 +466,81 @@
     let j = {};
     try { j = await r.json(); } catch (_) {}
     if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
-    return j; // { ok, simulated, confirmed, applied }
+    return j; // { ok, simulated, confirmed, applied, noteCreated }
+  }
+
+  // Intenta sincronizar un negocio. Devuelve un resultado interpretado y, si algo
+  // queda sin confirmar, QUÉ falta reenviar (remaining) y su categoría.
+  //   category: "ok" | "structural" (no sirve reintentar igual) | "transient" (sí)
+  async function attemptSync(deal, changes, note) {
+    const hasFields = Object.keys(changes || {}).length > 0;
+    if (!hasFields && !note) return { confirmed: true, category: "ok", message: "" };
+
+    if (!deal.pipedriveId) {
+      return {
+        confirmed: false, category: "structural",
+        message: "el negocio no tiene pipedrive_id. Reintentar no servirá hasta asignarle uno.",
+        remaining: { changes, note: note || null },
+      };
+    }
+    let r;
+    try {
+      r = await pushToPipedrive(deal.pipedriveId, changes, note);
+      console.log("[pipeline] respuesta de /api/pipedrive-sync:", r);
+    } catch (e) {
+      console.error("Pipedrive sync error:", e);
+      return {
+        confirmed: false, category: "transient",
+        message: "no se pudo conectar con Pipedrive (red o no respondió). Es temporal: puedes reintentar. (" + e.message + ")",
+        remaining: { changes, note: note || null },
+      };
+    }
+    if (r.simulated) {
+      return {
+        confirmed: false, category: "structural",
+        message: "modo prueba/dry-run: no se escribió en Pipedrive. Reintentar no servirá hasta activar la escritura real (PIPEDRIVE_TEST_DEAL_IDS / PIPEDRIVE_SYNC_ENABLED).",
+        remaining: { changes, note: note || null },
+      };
+    }
+    const fieldsOk = r.confirmed;
+    const noteOk = note ? !!r.noteCreated : true;
+    if (fieldsOk && noteOk) return { confirmed: true, category: "ok", message: "" };
+
+    const remaining = { changes: fieldsOk ? {} : changes, note: noteOk ? null : note };
+    if (!fieldsOk) {
+      return {
+        confirmed: false, category: "structural",
+        message: "Pipedrive no aplicó el cambio (suele ser porque el negocio tiene PRODUCTOS y el monto queda bloqueado, o el negocio está cerrado). Reintentar tal cual no servirá hasta resolver la causa.",
+        remaining,
+      };
+    }
+    // campos OK pero la nota falló → suele ser temporal
+    return {
+      confirmed: false, category: "transient",
+      message: "los campos se enviaron, pero la nota no se creó. Suele ser temporal: puedes reintentar.",
+      remaining,
+    };
+  }
+
+  // Qué reenviar para un negocio pendiente. Si no hay metadata (pendiente "viejo"),
+  // se reenvía el estado actual de los campos editables (sin nota).
+  function metaFor(deal) {
+    const m = pendingMeta[deal.id];
+    if (m && ((m.changes && Object.keys(m.changes).length) || m.note)) return m;
+    const c = { stage: deal.stage, amount: deal.amount, prob: deal.prob, status: deal.status };
+    if (deal.status === "perdido") c.lossReason = deal.lossReason || "";
+    return { changes: c, note: null };
+  }
+
+  function markPending(id, remaining) {
+    pendingIds.add(id);
+    pendingMeta[id] = remaining || { changes: {}, note: null };
+    savePending(); savePendingMeta();
+  }
+  function clearPendingFor(id) {
+    pendingIds.delete(id);
+    delete pendingMeta[id];
+    savePending(); savePendingMeta();
   }
 
   async function saveDraft() {
@@ -460,41 +550,17 @@
     const id = editingId;
     const orig = deals.find((x) => x.id === id) || {};
     const changes = computeChanges(orig, draft);
-    // El comentario no es campo del deal en Pipedrive: si cambió y no está vacío,
-    // viaja como NOTA nueva del negocio (deja historial).
     const commentChanged = draft.comment !== orig.comment;
     const noteText = (commentChanged && draft.comment && draft.comment.trim()) ? draft.comment.trim() : null;
     if (Object.keys(changes).length === 0 && !commentChanged) { closeDetail(); return; } // nada cambió
     console.log("[pipeline] guardar deal", id, "· pipedrive_id:", orig.pipedriveId || "(ninguno)", "· cambios:", changes, "· nota:", noteText ? "sí" : "no");
 
-    // 1) Intentar sincronizar con Pipedrive. confirmedSync = TODO confirmado.
-    let confirmedSync = false;
-    let syncMsg = "";
-    if (orig.pipedriveId && (Object.keys(changes).length > 0 || noteText)) {
-      els.saveBtn.disabled = true;
-      try {
-        const r = await pushToPipedrive(orig.pipedriveId, changes, noteText);
-        console.log("[pipeline] respuesta de /api/pipedrive-sync:", r);
-        if (r.simulated) {
-          syncMsg = " · ⏳ pendiente (modo prueba, no se escribió en Pipedrive)";
-        } else if (r.confirmed && (!noteText || r.noteCreated)) {
-          confirmedSync = true;
-          syncMsg = " y sincronizado con Pipedrive ✓";
-        } else if (r.confirmed && noteText && !r.noteCreated) {
-          syncMsg = " · ⏳ pendiente (la nota no se creó)";
-        } else {
-          syncMsg = " · ⏳ pendiente (Pipedrive no confirmó; ¿monto bloqueado por productos?)";
-        }
-      } catch (e) {
-        console.error("Pipedrive sync error:", e);
-        syncMsg = " · ⏳ pendiente (no se pudo enviar a Pipedrive: " + e.message + ")";
-      }
-    } else if (!orig.pipedriveId) {
-      syncMsg = " · ⏳ pendiente (este negocio no tiene pipedrive_id)";
-    }
+    // 1) Intentar sincronizar con Pipedrive.
+    els.saveBtn.disabled = true;
+    const res = await attemptSync(orig, changes, noteText);
 
-    // 2) Guardar en la app (Supabase o demo). Se guarda SIEMPRE: el cambio queda
-    //    registrado y, si no se confirmó en Pipedrive, marcado como pendiente.
+    // 2) Guardar SIEMPRE en la app (Supabase o demo): el cambio queda registrado
+    //    y, si no se confirmó, marcado como pendiente.
     try {
       if (mode === "supabase") {
         const updated = await SupaDeals.updateDeal(id, draft);
@@ -511,14 +577,39 @@
       return;
     }
 
-    // 3) Contador de pendientes: confirmado → fuera; cualquier otro caso → pendiente.
-    if (confirmedSync) pendingIds.delete(id);
-    else pendingIds.add(id);
-    savePending();
+    // 3) Pendiente sí/no.
+    if (res.confirmed) { clearPendingFor(id); }
+    else { markPending(id, res.remaining); }
 
     closeDetail();
     renderAll();
-    toast("Guardado" + syncMsg);
+    toast(res.confirmed ? "Guardado y sincronizado con Pipedrive ✓" : "Guardado · ⏳ pendiente (" + res.message + ")");
+  }
+
+  // Reintentar SOLO lo que quedó pendiente de un negocio.
+  async function retryDeal(id) {
+    if (retrying.has(id)) return;
+    const deal = deals.find((x) => x.id === id);
+    if (!deal || !isPending(deal)) return;
+    const meta = metaFor(deal);
+
+    retrying.add(id);
+    renderList(); // el botón pasa a "Reintentando…" y se deshabilita
+    const res = await attemptSync(deal, meta.changes || {}, meta.note);
+    retrying.delete(id);
+
+    if (res.confirmed) {
+      clearPendingFor(id);
+      renderAll();
+      toast("Sincronizado con Pipedrive ✓");
+    } else {
+      markPending(id, res.remaining); // actualiza lo que aún falta
+      renderList();
+      const prefix = res.category === "structural"
+        ? "No se sincronizó (reintentar no servirá aún): "
+        : "Falló (temporal, puedes reintentar): ";
+      toast(prefix + res.message);
+    }
   }
 
   /* ============================================================
@@ -564,8 +655,17 @@
      ============================================================ */
   function bindEvents() {
     els.list.addEventListener("click", (e) => {
+      const retry = e.target.closest(".retry-btn");
+      if (retry) { e.stopPropagation(); retryDeal(Number(retry.dataset.retry)); return; }
       const card = e.target.closest(".deal-card");
       if (card) openDetail(Number(card.dataset.id));
+    });
+    // accesibilidad: abrir con Enter/Espacio (la card es un div role=button)
+    els.list.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target.closest(".retry-btn")) return; // el botón maneja su propio Enter
+      const card = e.target.closest(".deal-card");
+      if (card) { e.preventDefault(); openDetail(Number(card.dataset.id)); }
     });
 
     els.search.addEventListener("input", (e) => { filters.text = e.target.value; renderList(); });
@@ -677,7 +777,8 @@
     // limpiar pendientes que ya no existen
     const validIds = new Set(deals.map((d) => d.id));
     [...pendingIds].forEach((id) => { if (!validIds.has(id)) pendingIds.delete(id); });
-    savePending();
+    Object.keys(pendingMeta).forEach((k) => { if (!validIds.has(Number(k))) delete pendingMeta[k]; });
+    savePending(); savePendingMeta();
 
     renderOwnerFilter();
     renderAll();

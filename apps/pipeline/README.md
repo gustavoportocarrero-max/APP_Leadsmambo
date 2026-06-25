@@ -42,8 +42,13 @@ Al guardar, el cambio va a Supabase y se intenta sincronizar con Pipedrive.
 - Si Pipedrive **confirma** → el negocio sale del contador (0 = todo sincronizado).
 - Si **no** se confirma (sin `pipedrive_id`, monto bloqueado por productos, error de
   red, modo prueba/dry-run, nota no creada) → el negocio queda **pendiente**, suma al
-  contador y se marca con "⏳ pendiente" en la card. Reintentar el guardado, una vez
-  confirmado, lo saca del contador.
+  contador y se marca con "⏳ pendiente" en la card.
+- **Reintentar sincronización**: las cards pendientes muestran un botón que reenvía
+  **solo lo que quedó sin confirmar** (no todo). Si confirma, sale del contador; si
+  vuelve a fallar, el mensaje distingue **transitorio** (red/Pipedrive no respondió →
+  vale reintentar) de **estructural** (productos bloquean el monto, sin `pipedrive_id`,
+  modo prueba → reintentar no servirá hasta resolver la causa). Mientras corre, el
+  botón queda en "Reintentando…" y deshabilitado.
 
 ## Ejecutar en local
 

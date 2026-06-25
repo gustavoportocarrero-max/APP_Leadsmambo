@@ -211,14 +211,17 @@ export default async function handler(req, res) {
   }
 
   log({ pipedriveId, step: "done", applied, confirmed, noteCreated, noteError });
-  res.status(confirmed ? 200 : 502).json({
-    ok: confirmed,
+  // La petición SE PROCESÓ (el PUT no falló). Devolvemos ok:true SIEMPRE aquí y
+  // dejamos que el cliente interprete `confirmed`/`noteCreated`: confirmed=false
+  // (p.ej. monto bloqueado por productos) es un caso ESTRUCTURAL, no un error de red.
+  res.status(200).json({
+    ok: true,
     simulated: false,
     confirmed,
     dealId: pipedriveId,
     applied,
     noteCreated,
     noteWarning: (note && !noteCreated) ? `Los campos se guardaron, pero la nota falló: ${noteError}` : undefined,
-    error: confirmed ? undefined : "Pipedrive no confirmó algún campo (¿el negocio usa productos? entonces el monto está bloqueado). Revisa el negocio.",
+    notConfirmedReason: confirmed ? undefined : "Pipedrive no aplicó algún campo (¿el negocio usa productos? entonces el monto está bloqueado).",
   });
 }
