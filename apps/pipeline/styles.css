@@ -225,7 +225,7 @@ input, select, textarea { font-family: inherit; }
               box-shadow var(--t-fast) var(--ease-snap);
 }
 .deal-card:active { transform: scale(0.985); }
-.deal-card.is-changed { box-shadow: inset 3px 0 0 var(--coral); border-color: rgba(250,84,120,0.35); }
+.deal-card.is-pending { box-shadow: inset 3px 0 0 var(--coral); border-color: rgba(250,84,120,0.35); }
 .deal-card.is-lost { opacity: 0.62; }
 
 .deal-org {
@@ -268,30 +268,6 @@ input, select, textarea { font-family: inherit; }
   padding: var(--s-7) var(--s-4); font-weight: 600;
 }
 
-/* ============================================================
-   FAB — exportar
-   ============================================================ */
-.fab {
-  position: fixed;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%);
-  z-index: 40;
-  display: inline-flex; align-items: center; gap: var(--s-2);
-  height: 52px; padding: 0 var(--s-5);
-  border-radius: var(--r-pill);
-  background: var(--coral); color: #fff;
-  font-weight: 800; font-size: 15px;
-  box-shadow: var(--shadow-coral);
-  transition: transform var(--t-fast) var(--ease-snap);
-}
-.fab:active { transform: translateX(-50%) scale(0.97); }
-.fab[hidden] { display: none; }
-.fab .count {
-  background: rgba(255,255,255,0.25); border-radius: var(--r-pill);
-  min-width: 22px; height: 22px; padding: 0 6px;
-  display: grid; place-items: center; font-size: 12px;
-}
 
 /* ============================================================
    DETALLE / EDICIÓN (pantalla 02 + 03)
@@ -472,57 +448,6 @@ input[type="range"]::-moz-range-thumb {
 .btn-primary:disabled { background: var(--lav-deep); box-shadow: none; opacity: 0.7; cursor: not-allowed; }
 .btn-ghost { padding: 0 var(--s-5); background: var(--lavender); color: var(--eggplant); }
 
-/* ============================================================
-   BOTTOM SHEET — exportar (pantalla 04)
-   ============================================================ */
-.scrim {
-  position: fixed; inset: 0; z-index: 60;
-  background: rgba(29,4,70,0.45);
-  opacity: 0; pointer-events: none;
-  transition: opacity var(--t-med);
-}
-.scrim.open { opacity: 1; pointer-events: auto; }
-
-.sheet {
-  position: fixed; left: 50%; bottom: 0;
-  transform: translateX(-50%) translateY(100%);
-  width: 100%; max-width: 460px;
-  z-index: 61;
-  background: var(--surface);
-  border-top-left-radius: var(--r-lg);
-  border-top-right-radius: var(--r-lg);
-  max-height: 86vh;
-  display: flex; flex-direction: column;
-  transition: transform var(--t-med) var(--ease-snap);
-}
-.sheet.open { transform: translateX(-50%) translateY(0); }
-.sheet-grip { width: 40px; height: 4px; border-radius: var(--r-pill); background: var(--lav-deep); margin: 10px auto 0; }
-.sheet-head { padding: var(--s-4) var(--s-4) var(--s-2); }
-.sheet-title { font-family: var(--font-display); font-weight: 800; font-size: 20px; letter-spacing: var(--track-display); }
-.sheet-sub { color: var(--ink-soft); font-size: 13px; font-weight: 600; }
-
-.sheet-list { overflow-y: auto; padding: var(--s-2) var(--s-4); flex: 1; }
-.change-item {
-  border-bottom: 1px solid var(--hairline);
-  padding: var(--s-3) 0;
-}
-.change-item:last-child { border-bottom: none; }
-.change-item .ci-title { font-weight: 700; font-size: 14px; }
-.change-item .ci-line { color: var(--ink-soft); font-size: 12px; margin-top: 2px; }
-.change-item .ci-line.mono { font-family: var(--font-mono); }
-
-.sheet-actions {
-  padding: var(--s-4);
-  padding-bottom: calc(var(--s-4) + env(safe-area-inset-bottom, 0px));
-  display: grid; gap: var(--s-3);
-  border-top: 1px solid var(--hairline);
-  background: var(--surface-raised);
-}
-.sheet-actions .row { display: flex; gap: var(--s-3); }
-.sheet-actions .row .btn { flex: 1; }
-.btn-line { border: 1px solid var(--hairline); background: var(--surface-raised); color: var(--eggplant); }
-.btn-reset { background: transparent; color: var(--coral); height: 44px; font-weight: 700; }
-
 /* toast */
 .toast {
   position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%) translateY(20px);
@@ -670,6 +595,18 @@ input[type="range"]::-moz-range-thumb {
 
 /* indicador "sin Pipedrive" */
 .nopd { font-size: 13px; color: var(--coral); margin-left: 4px; }
+.pending-tag {
+  margin-left: auto;
+  display: inline-flex; align-items: center;
+  height: 22px; padding: 0 9px;
+  border-radius: var(--r-pill);
+  background: #FFF0F4; color: var(--coral);
+  border: 1px solid rgba(250, 84, 120, 0.35);
+  font-size: 11px; font-weight: 800; letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+/* si hay tag de pendiente, el candado ya no empuja desde la izquierda */
+.pending-tag ~ .lock { margin-left: 6px; }
 .sync-notice {
   background: #FFF6E9;
   color: #8a5a00;

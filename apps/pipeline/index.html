@@ -68,13 +68,6 @@
 
     <!-- ===== LISTA DE NEGOCIOS ===== -->
     <section class="list" id="dealList"></section>
-
-    <!-- FAB exportar -->
-    <button class="fab" id="exportFab" hidden>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      Exportar cambios
-      <span class="count" id="fabCount">0</span>
-    </button>
   </main>
 
   <!-- ===== DETALLE / EDICIÓN (pantalla 02 + 03) ===== -->
@@ -154,24 +147,6 @@
       <button class="btn btn-primary" id="saveBtn">Guardar</button>
     </div>
   </aside>
-
-  <!-- ===== BOTTOM SHEET EXPORTAR (pantalla 04) ===== -->
-  <div class="scrim" id="scrim"></div>
-  <section class="sheet" id="sheet" aria-hidden="true" aria-label="Exportar cambios">
-    <div class="sheet-grip"></div>
-    <div class="sheet-head">
-      <div class="sheet-title">Exportar cambios</div>
-      <div class="sheet-sub" id="sheetSub">0 negocios modificados</div>
-    </div>
-    <div class="sheet-list" id="sheetList"></div>
-    <div class="sheet-actions">
-      <div class="row">
-        <button class="btn btn-line" id="copyBtn">Copiar resumen</button>
-        <button class="btn btn-primary" id="csvBtn" style="box-shadow:none">Descargar CSV</button>
-      </div>
-      <button class="btn-reset" id="resetBtn">Reiniciar cambios</button>
-    </div>
-  </section>
 
   <!-- ===== ¿QUIÉN ERES? (selector de partner) ===== -->
   <div class="id-overlay" id="identityOverlay" aria-hidden="true">

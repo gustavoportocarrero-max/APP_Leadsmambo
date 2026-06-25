@@ -21,7 +21,11 @@
   let draftEditable = false;// si el usuario actual puede editar el draft
   let mode = "demo";        // "supabase" | "demo"
   let currentUser = localStorage.getItem(STORAGE_USER) || "";
-  let pendingIds = new Set(loadPending()); // negocios que YO edité (para exportar)
+  // pendingIds = negocios con cambios PENDIENTES de confirmar en Pipedrive.
+  // Un guardado confirmado en Pipedrive saca al negocio de aquí (queda en 0);
+  // cualquier guardado no confirmado (sin pipedrive_id, monto bloqueado por
+  // productos, error de red, modo prueba/dry-run) lo mantiene pendiente.
+  let pendingIds = new Set(loadPending());
   let lastWrite = { id: null, t: 0 };      // para no auto-notificar mi propio cambio
 
   /* ---------- DOM refs ---------- */
@@ -35,8 +39,6 @@
     changeCount: $("changeCount"),
     statChanges: $("statChanges"),
     totalAmount: $("totalAmount"),
-    exportFab: $("exportFab"),
-    fabCount: $("fabCount"),
     connBanner: $("connBanner"),
     // identidad
     identityChip: $("identityChip"),
@@ -65,14 +67,6 @@
     saveBtn: $("saveBtn"),
     cancelBtn: $("cancelBtn"),
     backBtn: $("backBtn"),
-    // sheet
-    scrim: $("scrim"),
-    sheet: $("sheet"),
-    sheetSub: $("sheetSub"),
-    sheetList: $("sheetList"),
-    copyBtn: $("copyBtn"),
-    csvBtn: $("csvBtn"),
-    resetBtn: $("resetBtn"),
     toast: $("toast"),
   };
 
@@ -142,10 +136,10 @@
   }
 
   /* ============================================================
-     Cambios pendientes de exportar (mis ediciones de esta sesión)
+     Pendientes de confirmar en Pipedrive
      ============================================================ */
-  function isChanged(d) { return pendingIds.has(d.id); }
-  function changedDeals() { return deals.filter((d) => pendingIds.has(d.id)); }
+  function isPending(d) { return pendingIds.has(d.id); }
+  function pendingDeals() { return deals.filter((d) => pendingIds.has(d.id)); }
 
   /* ============================================================
      Helpers de formato
@@ -213,7 +207,8 @@
      Render — header / stats
      ============================================================ */
   function renderStats() {
-    const n = changedDeals().length;
+    // "Cambios" = negocios pendientes de confirmar en Pipedrive (0 = todo sincronizado)
+    const n = pendingDeals().length;
     els.changeCount.textContent = n;
     els.statChanges.classList.toggle("changed", n > 0);
 
@@ -222,9 +217,6 @@
       .filter((d) => d.status === "activo")
       .reduce((sum, d) => sum + (d.amount || 0), 0);
     els.totalAmount.textContent = fmtMoney(total);
-
-    els.exportFab.hidden = n === 0;
-    els.fabCount.textContent = n;
   }
 
   /* ============================================================
@@ -271,7 +263,7 @@
 
   function cardHtml(d) {
     const st = stageById[d.stage] || { label: d.stage, bg: "#DCD7FF", text: "#1D0446" };
-    const changed = isChanged(d) ? " is-changed" : "";
+    const pending = isPending(d);
     const lost = d.status === "perdido";
     const won = d.status === "ganado";
     const locked = !isEditable(d);
@@ -286,9 +278,12 @@
     const noPd = !d.pipedriveId
       ? `<span class="nopd" title="Sin ID de Pipedrive — no se sincroniza">⚠</span>`
       : "";
+    const pendingTag = pending
+      ? `<span class="pending-tag" title="Cambio pendiente de confirmar en Pipedrive">⏳ pendiente</span>`
+      : "";
 
     return `
-      <button class="deal-card${changed}${lost ? " is-lost" : ""}${locked ? " is-locked" : ""}" data-id="${d.id}">
+      <button class="deal-card${pending ? " is-pending" : ""}${lost ? " is-lost" : ""}${locked ? " is-locked" : ""}" data-id="${d.id}">
         <div>
           <div class="deal-org">${escapeHtml(d.org)}</div>
           <div class="deal-title">${escapeHtml(d.title)}</div>
@@ -298,6 +293,7 @@
           ${badge}
           <span class="deal-amount">${fmtMoney(d.amount)}</span>
           <span class="deal-prob">${probText(d.prob)}</span>
+          ${pendingTag}
           ${noPd}
           ${lock}
         </div>
@@ -471,30 +467,34 @@
     if (Object.keys(changes).length === 0 && !commentChanged) { closeDetail(); return; } // nada cambió
     console.log("[pipeline] guardar deal", id, "· pipedrive_id:", orig.pipedriveId || "(ninguno)", "· cambios:", changes, "· nota:", noteText ? "sí" : "no");
 
+    // 1) Intentar sincronizar con Pipedrive. confirmedSync = TODO confirmado.
+    let confirmedSync = false;
     let syncMsg = "";
-    // 1) Pipedrive PRIMERO (confirmar antes de dar por bueno en la app).
     if (orig.pipedriveId && (Object.keys(changes).length > 0 || noteText)) {
       els.saveBtn.disabled = true;
       try {
         const r = await pushToPipedrive(orig.pipedriveId, changes, noteText);
         console.log("[pipeline] respuesta de /api/pipedrive-sync:", r);
         if (r.simulated) {
-          syncMsg = " · ⚠ SOLO PRUEBA (no se escribió en Pipedrive)";
+          syncMsg = " · ⏳ pendiente (modo prueba, no se escribió en Pipedrive)";
+        } else if (r.confirmed && (!noteText || r.noteCreated)) {
+          confirmedSync = true;
+          syncMsg = " y sincronizado con Pipedrive ✓";
+        } else if (r.confirmed && noteText && !r.noteCreated) {
+          syncMsg = " · ⏳ pendiente (la nota no se creó)";
         } else {
-          syncMsg = r.confirmed ? " · enviado a Pipedrive ✓" : " · ⚠ Pipedrive sin confirmar (revisa el monto)";
-          if (noteText) syncMsg += r.noteCreated ? " · nota creada" : " · ⚠ nota NO creada";
+          syncMsg = " · ⏳ pendiente (Pipedrive no confirmó; ¿monto bloqueado por productos?)";
         }
       } catch (e) {
         console.error("Pipedrive sync error:", e);
-        toast("No se escribió en Pipedrive: " + e.message + ". No se guardó el cambio.");
-        refreshSaveState();
-        return; // NO tocar Supabase → app y Pipedrive quedan consistentes (sin cambio)
+        syncMsg = " · ⏳ pendiente (no se pudo enviar a Pipedrive: " + e.message + ")";
       }
     } else if (!orig.pipedriveId) {
-      syncMsg = " · ⚠ NO se envió a Pipedrive (este negocio no tiene pipedrive_id)";
+      syncMsg = " · ⏳ pendiente (este negocio no tiene pipedrive_id)";
     }
 
-    // 2) Guardar en la app (Supabase o demo).
+    // 2) Guardar en la app (Supabase o demo). Se guarda SIEMPRE: el cambio queda
+    //    registrado y, si no se confirmó en Pipedrive, marcado como pendiente.
     try {
       if (mode === "supabase") {
         const updated = await SupaDeals.updateDeal(id, draft);
@@ -504,16 +504,21 @@
         const idx = deals.findIndex((x) => x.id === id);
         if (idx >= 0) { deals[idx] = { ...deals[idx], ...draft }; saveDemoOverride(deals[idx]); }
       }
-      pendingIds.add(id);
-      savePending();
-      closeDetail();
-      renderAll();
-      toast("Guardado" + syncMsg);
     } catch (e) {
       console.error("Error al guardar en la app:", e);
-      toast("Se escribió en Pipedrive pero falló guardar en la app. Reintenta.");
+      toast("No se pudo guardar el cambio. Reintenta.");
       refreshSaveState();
+      return;
     }
+
+    // 3) Contador de pendientes: confirmado → fuera; cualquier otro caso → pendiente.
+    if (confirmedSync) pendingIds.delete(id);
+    else pendingIds.add(id);
+    savePending();
+
+    closeDetail();
+    renderAll();
+    toast("Guardado" + syncMsg);
   }
 
   /* ============================================================
@@ -531,103 +536,6 @@
     renderOwnerFilter();
     const mine = deal && lastWrite.id === deal.id && (Date.now() - lastWrite.t < 2500);
     if (deal && !mine) toast("Pipeline actualizado");
-  }
-
-  /* ============================================================
-     Bottom sheet — exportar
-     ============================================================ */
-  function openSheet() {
-    renderSheet();
-    els.scrim.classList.add("open");
-    els.sheet.classList.add("open");
-    els.sheet.setAttribute("aria-hidden", "false");
-  }
-  function closeSheet() {
-    els.scrim.classList.remove("open");
-    els.sheet.classList.remove("open");
-    els.sheet.setAttribute("aria-hidden", "true");
-  }
-
-  function renderSheet() {
-    const changed = changedDeals();
-    els.sheetSub.textContent =
-      changed.length + (changed.length === 1 ? " negocio modificado por ti" : " negocios modificados por ti");
-    els.sheetList.innerHTML = changed.map((d) => {
-      const st = stageById[d.stage];
-      const etapa = d.status === "perdido"
-        ? `PERDIDO (${escapeHtml(d.lossReason)})`
-        : escapeHtml(st ? st.label : d.stage);
-      return `
-        <div class="change-item">
-          <div class="ci-title">${escapeHtml(d.org)} – ${escapeHtml(d.title)}</div>
-          <div class="ci-line">Etapa: ${etapa}</div>
-          <div class="ci-line mono">${fmtMoney(d.amount)} · Prob: ${probText(d.prob)}</div>
-        </div>`;
-    }).join("") || '<div class="empty">No hay cambios para exportar.</div>';
-  }
-
-  function buildSummary() {
-    return changedDeals().map((d) => {
-      const st = stageById[d.stage];
-      const etapa = d.status === "perdido"
-        ? `PERDIDO (${d.lossReason})`
-        : (st ? st.label : d.stage);
-      return `${d.org} – ${d.title} | Etapa: ${etapa} | Monto: ${fmtMoney(d.amount)} | Prob: ${probText(d.prob)} | Comentario: ${d.comment || "—"}`;
-    }).join("\n");
-  }
-
-  function copySummary() {
-    const text = buildSummary();
-    if (!text) { toast("No hay cambios"); return; }
-    navigator.clipboard.writeText(text).then(
-      () => toast("Resumen copiado"),
-      () => { fallbackCopy(text); toast("Resumen copiado"); }
-    );
-  }
-  function fallbackCopy(text) {
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select();
-    try { document.execCommand("copy"); } catch (_) {}
-    document.body.removeChild(ta);
-  }
-
-  /* ---------- CSV (UTF-8 con BOM) ---------- */
-  function downloadCsv() {
-    const changed = changedDeals();
-    if (!changed.length) { toast("No hay cambios"); return; }
-    const headers = ["Organización","Título","Propietario","Etapa","Monto","Probabilidad","Comentario","Estado","Motivo de pérdida"];
-    const rows = changed.map((d) => {
-      const st = stageById[d.stage];
-      return [
-        d.org, d.title, d.owner, st ? st.label : d.stage,
-        d.amount, d.prob === null ? "" : d.prob, d.comment, d.status, d.lossReason,
-      ];
-    });
-    const csv = [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "pipeline-cambios.csv";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast("CSV descargado");
-  }
-  function csvCell(v) {
-    const s = String(v ?? "");
-    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  }
-
-  // Vacía la lista de exportación (NO toca Supabase).
-  function clearPending() {
-    if (!pendingIds.size) { toast("Lista vacía"); return; }
-    if (!confirm("¿Vaciar tu lista de cambios para exportar?\n(No borra nada en Supabase, solo limpia esta lista local.)")) return;
-    pendingIds.clear();
-    savePending();
-    closeSheet();
-    renderAll();
-    toast("Lista vaciada");
   }
 
   /* ============================================================
@@ -734,16 +642,9 @@
     els.cancelBtn.addEventListener("click", closeDetail);
     els.backBtn.addEventListener("click", closeDetail);
 
-    els.exportFab.addEventListener("click", openSheet);
-    els.scrim.addEventListener("click", closeSheet);
-    els.copyBtn.addEventListener("click", copySummary);
-    els.csvBtn.addEventListener("click", downloadCsv);
-    els.resetBtn.addEventListener("click", clearPending);
-
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
       if (els.identityOverlay.classList.contains("open")) { if (currentUser) hideIdentity(); }
-      else if (els.sheet.classList.contains("open")) closeSheet();
       else if (els.detail.classList.contains("open")) closeDetail();
     });
   }

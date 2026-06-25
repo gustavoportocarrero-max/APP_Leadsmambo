@@ -32,13 +32,18 @@ apps/pipeline/
 
 1. **Lista de negocios** — cards (org, título, etapa, monto, prob, avatar);
    filtros por dueño, etapa (chips) y búsqueda; toggle ver/ocultar perdidos;
-   header con contador de cambios + total "en juego".
+   header con contador de **pendientes** (de confirmar en Pipedrive) + total "en juego".
 2. **Detalle / edición** — tags read-only (vertical, tipo de cliente, industria,
    origen); editable: etapa, monto, probabilidad, comentario; barra de guardado sticky.
-3. **Marcar perdido** — toggle en el detalle; motivo obligatorio (bloquea el guardado
-   con mensaje de error visible).
-4. **Exportar cambios** — bottom sheet con los negocios modificados; copiar resumen
-   (texto para WhatsApp); descargar CSV (UTF-8 con BOM); reiniciar cambios.
+3. **Resultado** — En curso / Ganado / Perdido (perdido exige motivo).
+
+### Contador "Cambios" = pendientes de confirmar en Pipedrive
+Al guardar, el cambio va a Supabase y se intenta sincronizar con Pipedrive.
+- Si Pipedrive **confirma** → el negocio sale del contador (0 = todo sincronizado).
+- Si **no** se confirma (sin `pipedrive_id`, monto bloqueado por productos, error de
+  red, modo prueba/dry-run, nota no creada) → el negocio queda **pendiente**, suma al
+  contador y se marca con "⏳ pendiente" en la card. Reintentar el guardado, una vez
+  confirmado, lo saca del contador.
 
 ## Ejecutar en local
 
@@ -81,11 +86,8 @@ interno; si luego se quiere seguridad real, se agrega login.
 - Todos ven todos los negocios; cada quien solo **edita los suyos** (los demás salen en
   solo lectura, con candado 🔒). Se puede cambiar de partner tocando el chip del header.
 
-### Exportar (llenado manual en Pipedrive)
-
-Los botones **Copiar resumen** y **Descargar CSV** siguen ahí: arman la lista de los
-negocios que *tú* editaste en esta sesión, para facilitar el traspaso a Pipedrive.
-"Vaciar lista" solo limpia esa lista local (no borra nada en Supabase).
+> Nota: el flujo de **Exportar/CSV/Copiar resumen** se eliminó. Ya no se necesita: los
+> cambios se sincronizan directo a Pipedrive y el contador muestra lo que quede pendiente.
 
 ## PWA — instalable en iPhone y Android
 
