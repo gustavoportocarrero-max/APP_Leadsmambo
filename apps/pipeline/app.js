@@ -444,11 +444,12 @@
   }
 
   // Escritura server-side a Pipedrive (el token vive en el servidor).
-  async function pushToPipedrive(pipedriveId, changes) {
+  // `note` (opcional) = texto del comentario nuevo → se crea como nota del negocio.
+  async function pushToPipedrive(pipedriveId, changes, note) {
     const r = await fetch("/api/pipedrive-sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pipedriveId, changes }),
+      body: JSON.stringify({ pipedriveId, changes, note: note || undefined }),
     });
     let j = {};
     try { j = await r.json(); } catch (_) {}
@@ -463,26 +464,33 @@
     const id = editingId;
     const orig = deals.find((x) => x.id === id) || {};
     const changes = computeChanges(orig, draft);
-    if (Object.keys(changes).length === 0) { closeDetail(); return; } // nada cambió
-    console.log("[pipeline] guardar deal", id, "· pipedrive_id:", orig.pipedriveId || "(ninguno)", "· cambios:", changes);
+    // El comentario no es campo del deal en Pipedrive: si cambió y no está vacío,
+    // viaja como NOTA nueva del negocio (deja historial).
+    const commentChanged = draft.comment !== orig.comment;
+    const noteText = (commentChanged && draft.comment && draft.comment.trim()) ? draft.comment.trim() : null;
+    if (Object.keys(changes).length === 0 && !commentChanged) { closeDetail(); return; } // nada cambió
+    console.log("[pipeline] guardar deal", id, "· pipedrive_id:", orig.pipedriveId || "(ninguno)", "· cambios:", changes, "· nota:", noteText ? "sí" : "no");
 
     let syncMsg = "";
     // 1) Pipedrive PRIMERO (confirmar antes de dar por bueno en la app).
-    if (orig.pipedriveId) {
+    if (orig.pipedriveId && (Object.keys(changes).length > 0 || noteText)) {
       els.saveBtn.disabled = true;
       try {
-        const r = await pushToPipedrive(orig.pipedriveId, changes);
+        const r = await pushToPipedrive(orig.pipedriveId, changes, noteText);
         console.log("[pipeline] respuesta de /api/pipedrive-sync:", r);
-        syncMsg = r.simulated
-          ? " · ⚠ SOLO PRUEBA (no se escribió en Pipedrive)"
-          : (r.confirmed ? " · enviado a Pipedrive ✓" : " · ⚠ Pipedrive sin confirmar");
+        if (r.simulated) {
+          syncMsg = " · ⚠ SOLO PRUEBA (no se escribió en Pipedrive)";
+        } else {
+          syncMsg = r.confirmed ? " · enviado a Pipedrive ✓" : " · ⚠ Pipedrive sin confirmar (revisa el monto)";
+          if (noteText) syncMsg += r.noteCreated ? " · nota creada" : " · ⚠ nota NO creada";
+        }
       } catch (e) {
         console.error("Pipedrive sync error:", e);
         toast("No se escribió en Pipedrive: " + e.message + ". No se guardó el cambio.");
         refreshSaveState();
         return; // NO tocar Supabase → app y Pipedrive quedan consistentes (sin cambio)
       }
-    } else {
+    } else if (!orig.pipedriveId) {
       syncMsg = " · ⚠ NO se envió a Pipedrive (este negocio no tiene pipedrive_id)";
     }
 

@@ -160,7 +160,13 @@ Al guardar un cambio, la app escribe en Pipedrive vía la función serverless
 - **Solo deals con `pipedrive_id`.** Los que no lo tienen se guardan en la app pero
   no se sincronizan, y se marcan con ⚠ "sin Pipedrive".
 - **Solo campos que cambiaron** (etapa→`stage_id`, monto→`value`, prob→`probability`,
-  ganado→`status:won`, perdido→`status:lost`+`lost_reason`).
+  ganado→`status:won`, perdido→`status:lost`+`lost_reason`). Un guardado con varios
+  campos los manda **todos juntos** en un solo PUT, y confirma cada uno (incluido
+  `value`: si el negocio usa **productos**, Pipedrive bloquea el monto y la app avisa
+  "Pipedrive sin confirmar").
+- **Comentario → NOTA**: si el comentario cambió, se crea como **nota nueva** del
+  negocio (`POST /notes` con `deal_id`), dejando historial. Mismas reglas
+  (server-side, pipeline 1, modo prueba).
 - **Pipedrive primero, luego la app**: si Pipedrive rechaza, no se guarda en la app
   (no quedan estados contradictorios). Cada intento se registra (Vercel → Logs).
 

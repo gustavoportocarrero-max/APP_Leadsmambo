@@ -135,58 +135,90 @@ export default async function handler(req, res) {
     body.lost_reason = changes.lossReason || "";
   }
 
-  if (Object.keys(body).length === 0) {
-    res.status(200).json({ ok: true, simulated: true, noChanges: true, message: "Sin campos para escribir." });
+  // Comentario nuevo → se crea como NOTA del negocio (cada uno deja historial).
+  const note = (typeof payload.note === "string" && payload.note.trim()) ? payload.note.trim() : null;
+  const hasFields = Object.keys(body).length > 0;
+
+  if (!hasFields && !note) {
+    res.status(200).json({ ok: true, simulated: true, noChanges: true, message: "Sin campos ni nota para escribir." });
     return;
   }
 
   const willWrite = testIds.length ? testIds.includes(pipedriveId) : enabled;
   const modeLabel = testIds.length ? "test-ids" : (enabled ? "enabled" : "dry-run");
-  log({ pipedriveId, pipeline_id: deal.pipeline_id, body, willWrite, mode: modeLabel });
+  log({ pipedriveId, pipeline_id: deal.pipeline_id, body, note: note ? note.slice(0, 80) : null, willWrite, mode: modeLabel });
 
   // 3) Dry-run: no escribir, solo informar qué se escribiría
   if (!willWrite) {
     res.status(200).json({
-      ok: true, simulated: true, dealId: pipedriveId, wouldWrite: body,
+      ok: true, simulated: true, dealId: pipedriveId, wouldWrite: body, wouldAddNote: !!note,
       message: "Simulado: NO se escribió en Pipedrive (modo prueba).",
     });
     return;
   }
 
-  // 4) Escribir (PUT) solo los campos cambiados
-  let putJson;
-  try {
-    const r = await fetch(apiUrl(`/deals/${pipedriveId}`), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    putJson = await r.json().catch(() => ({}));
-    if (!r.ok || putJson.success === false) {
-      log({ pipedriveId, step: "put", ok: false, status: r.status, error: putJson.error });
-      res.status(502).json({ ok: false, error: `Pipedrive rechazó la escritura: ${putJson.error || "HTTP " + r.status}` });
+  // 4) Escribir los campos del deal (PUT), si hay
+  let applied = {};
+  let confirmed = true;
+  if (hasFields) {
+    let putJson;
+    try {
+      const r = await fetch(apiUrl(`/deals/${pipedriveId}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      putJson = await r.json().catch(() => ({}));
+      if (!r.ok || putJson.success === false) {
+        log({ pipedriveId, step: "put", ok: false, status: r.status, error: putJson.error });
+        res.status(502).json({ ok: false, error: `Pipedrive rechazó la escritura: ${putJson.error || "HTTP " + r.status}` });
+        return;
+      }
+    } catch (e) {
+      log({ pipedriveId, step: "put", error: String(e) });
+      res.status(502).json({ ok: false, error: "Error de red al escribir en Pipedrive." });
       return;
     }
-  } catch (e) {
-    log({ pipedriveId, step: "put", error: String(e) });
-    res.status(502).json({ ok: false, error: "Error de red al escribir en Pipedrive." });
-    return;
+    // Confirmar con la respuesta (el PUT devuelve el deal actualizado).
+    const after = putJson.data || {};
+    if ("stage_id" in body && after.stage_id !== body.stage_id) confirmed = false;
+    if ("status" in body && after.status !== body.status) confirmed = false;
+    if ("value" in body && Number(after.value) !== Number(body.value)) confirmed = false; // p.ej. deals con productos no aceptan value
+    applied = { stage_id: after.stage_id, value: after.value, probability: after.probability, status: after.status };
   }
 
-  // 5) Confirmar con la respuesta de Pipedrive (el PUT devuelve el deal actualizado)
-  const after = putJson.data || {};
-  let confirmed = true;
-  if ("stage_id" in body && after.stage_id !== body.stage_id) confirmed = false;
-  if ("status" in body && after.status !== body.status) confirmed = false;
-  const applied = { stage_id: after.stage_id, value: after.value, probability: after.probability, status: after.status };
-  log({ pipedriveId, step: "done", applied, confirmed });
+  // 5) Crear la nota (si hay comentario nuevo) — POST /notes con deal_id
+  let noteCreated = false, noteError = null;
+  if (note) {
+    try {
+      const r = await fetch(apiUrl(`/notes`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deal_id: pipedriveId, content: note }),
+      });
+      const nj = await r.json().catch(() => ({}));
+      if (!r.ok || nj.success === false) { noteError = nj.error || ("HTTP " + r.status); log({ pipedriveId, step: "note", ok: false, error: noteError }); }
+      else noteCreated = true;
+    } catch (e) {
+      noteError = String(e);
+      log({ pipedriveId, step: "note", error: noteError });
+    }
+    // Si SOLO se pidió la nota (sin campos) y falló → error duro.
+    if (!hasFields && !noteCreated) {
+      res.status(502).json({ ok: false, error: `No se pudo crear la nota: ${noteError}` });
+      return;
+    }
+  }
 
+  log({ pipedriveId, step: "done", applied, confirmed, noteCreated, noteError });
   res.status(confirmed ? 200 : 502).json({
     ok: confirmed,
     simulated: false,
     confirmed,
     dealId: pipedriveId,
     applied,
-    error: confirmed ? undefined : "Pipedrive no confirmó el cambio. Revisa el negocio.",
+    noteCreated,
+    noteWarning: (note && !noteCreated) ? `Los campos se guardaron, pero la nota falló: ${noteError}` : undefined,
+    error: confirmed ? undefined : "Pipedrive no confirmó algún campo (¿el negocio usa productos? entonces el monto está bloqueado). Revisa el negocio.",
   });
 }
