@@ -202,6 +202,36 @@ Sin las dos últimas → **todo se simula** (dry-run), no escribe nada. Modo seg
   ("Escogieron otro proveedor", "Desinterés (dejaron de contestar)",
   "Falta de presupuesto") que se envían como `lost_reason`.
 - **Ganado**: solo desde "Presentación de propuesta" en adelante; envía `status:won`.
+- Al **cerrar** (ganado/perdido) y confirmarse en Pipedrive, el negocio **sale de la
+  vista activa** (se borra de la app; Pipedrive conserva el registro).
+
+## Sincronización de ENTRADA (Pipedrive → app) — cron
+
+`api/pipedrive-pull.js` corre server-side (por cron o manual) y trae del **pipeline 1**:
+- **nuevos** (con su `pipedrive_id` y su `add_time` real como `created_at`),
+- **actualiza** los existentes (Pipedrive manda),
+- **quita** los que quedaron ganados/perdidos o salieron del pipeline 1,
+- **respeta los pendientes**: NO pisa filas con `sync_pending = true` (cambios locales
+  aún no confirmados) para no perderlos. Usa `pipedrive_id` como identificador único.
+- Cada corrida registra conteos en **Vercel → Logs** (`[pipedrive-pull]`).
+
+### Frecuencia / plan de Vercel
+- `vercel.json` trae el cron cada 2h (`0 */2 * * *`) → funciona en **Vercel Pro**.
+- En **Hobby (gratis)** el cron es ~1/día. Alternativa gratis: un **cron externo**
+  (cron-job.org, UptimeRobot, GitHub Actions) que llame cada 2h a
+  `https://TU-APP.vercel.app/api/pipedrive-pull?key=<CRON_SECRET>`.
+
+### Variables de entorno (además de las de salida)
+| Nombre | Para qué |
+|---|---|
+| `SUPABASE_URL` | ya creada |
+| `SUPABASE_SERVICE_ROLE_KEY` | **NUEVA** — clave *service_role* de Supabase (Settings → API). Solo server-side; NUNCA al navegador ni al repo |
+| `CRON_SECRET` | **NUEVA** — texto secreto que inventas; protege el endpoint y sirve para dispararlo manual |
+
+### Probar sin esperar 2 horas
+Abre en el navegador: `https://TU-APP.vercel.app/api/pipedrive-pull?key=<CRON_SECRET>`
+→ corre una vez y devuelve un resumen JSON: `{ nuevos, actualizados, quitados_por_cierre,
+saltados_por_pendientes, ... }`. También lo ves en **Vercel → Logs**.
 
 ## Deploy
 

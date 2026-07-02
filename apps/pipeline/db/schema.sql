@@ -7,6 +7,7 @@
 create table if not exists public.deals (
   id           bigint generated always as identity primary key,
   pipedrive_id bigint,                                     -- id del negocio en Pipedrive (NULL = no sincronizable)
+  sync_pending boolean not null default false,             -- cambio local sin confirmar en Pipedrive (el cron no lo pisa)
   -- editables desde la app
   stage        text    not null default 'target',         -- target|primera|contacto|propuesta|cierre|nurturing
   amount       numeric not null default 0,                 -- valor del negocio (US$)
@@ -31,7 +32,8 @@ create table if not exists public.deals (
 -- Índices útiles para filtrar
 create index if not exists deals_owner_idx on public.deals (owner);
 create index if not exists deals_stage_idx on public.deals (stage);
-create index if not exists deals_pipedrive_idx on public.deals (pipedrive_id);
+-- único por pipedrive_id (anti-duplicados + habilita upsert); NULLs repetidos permitidos
+create unique index if not exists deals_pipedrive_uidx on public.deals (pipedrive_id);
 
 -- 2) updated_at automático en cada UPDATE ------------------------------
 create or replace function public.set_updated_at()
@@ -68,6 +70,10 @@ create policy deals_update_anon on public.deals
 drop policy if exists deals_insert_anon on public.deals;
 create policy deals_insert_anon on public.deals
   for insert to anon with check (true);
+
+drop policy if exists deals_delete_anon on public.deals;
+create policy deals_delete_anon on public.deals
+  for delete to anon using (true);
 
 -- 4) Realtime: emitir cambios de la tabla ------------------------------
 alter table public.deals replica identity full;

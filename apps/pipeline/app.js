@@ -542,6 +542,19 @@
     delete pendingMeta[id];
     savePending(); savePendingMeta();
   }
+  function isClosed(d) { return d.status === "ganado" || d.status === "perdido"; }
+
+  // Quita el negocio de la vista activa (al cerrarlo: ganado/perdido).
+  async function removeDealFromApp(id) {
+    if (mode === "supabase") {
+      await SupaDeals.deleteDeal(id); // realtime avisará a los demás
+    } else {
+      const ov = loadDemoOverrides(); delete ov[id];
+      localStorage.setItem(STORAGE_DEMO, JSON.stringify(ov));
+    }
+    deals = deals.filter((d) => d.id !== id);
+    clearPendingFor(id);
+  }
 
   async function saveDraft() {
     if (!draftEditable) return;
@@ -558,12 +571,28 @@
     // 1) Intentar sincronizar con Pipedrive.
     els.saveBtn.disabled = true;
     const res = await attemptSync(orig, changes, noteText);
+    const closing = draft.status === "ganado" || draft.status === "perdido";
 
-    // 2) Guardar SIEMPRE en la app (Supabase o demo): el cambio queda registrado
-    //    y, si no se confirmó, marcado como pendiente.
+    // 2a) Cerrado Y confirmado → sale de la vista activa (se quita de la app).
+    if (res.confirmed && closing) {
+      try {
+        await removeDealFromApp(id);
+      } catch (e) {
+        console.error("Error al quitar el negocio:", e);
+        toast("Cerrado en Pipedrive, pero no se pudo quitar de la app. Reintenta.");
+        refreshSaveState();
+        return;
+      }
+      closeDetail();
+      renderAll();
+      toast("Negocio cerrado en Pipedrive; sale de la vista activa ✓");
+      return;
+    }
+
+    // 2b) Guardar en la app (Supabase o demo). sync_pending = !confirmado (para el cron).
     try {
       if (mode === "supabase") {
-        const updated = await SupaDeals.updateDeal(id, draft);
+        const updated = await SupaDeals.updateDeal(id, draft, !res.confirmed);
         applyDeal(updated);
         lastWrite = { id: id, t: Date.now() };
       } else {
@@ -599,6 +628,16 @@
     retrying.delete(id);
 
     if (res.confirmed) {
+      if (isClosed(deal)) {
+        // cerrado y ya confirmado → sale de la vista activa
+        try { await removeDealFromApp(id); }
+        catch (e) { console.error(e); markPending(id, res.remaining); renderList(); toast("Cerrado, pero no se pudo quitar de la app. Reintenta."); return; }
+        renderAll();
+        toast("Negocio cerrado en Pipedrive; sale de la vista activa ✓");
+        return;
+      }
+      // confirmado normal → limpiar la bandera del cron y el pendiente local
+      try { if (mode === "supabase") await SupaDeals.updateDeal(id, deal, false); } catch (_) {}
       clearPendingFor(id);
       renderAll();
       toast("Sincronizado con Pipedrive ✓");
@@ -619,6 +658,8 @@
     if (type === "DELETE") {
       deals = deals.filter((d) => d.id !== oldId);
       pendingIds.delete(oldId);
+      delete pendingMeta[oldId];
+      savePending(); savePendingMeta();
     } else if (deal) {
       applyDeal(deal);
     }

@@ -83,15 +83,25 @@ window.SupaDeals = (function () {
     return data.map(rowToDeal);
   }
 
-  async function updateDeal(id, deal) {
+  // syncPending: marca la fila como "cambio local sin confirmar en Pipedrive"
+  // para que el cron de entrada NO la sobreescriba con datos viejos.
+  async function updateDeal(id, deal, syncPending) {
+    const patch = editablePatch(deal);
+    patch.sync_pending = !!syncPending;
     const { data, error } = await client
       .from("deals")
-      .update(editablePatch(deal))
+      .update(patch)
       .eq("id", id)
       .select()
       .single();
     if (error) throw error;
     return rowToDeal(data);
+  }
+
+  // Borra el negocio (se usa al cerrarlo: ganado/perdido → sale de la vista activa).
+  async function deleteDeal(id) {
+    const { error } = await client.from("deals").delete().eq("id", id);
+    if (error) throw error;
   }
 
   // onChange(eventType, deal|null, oldId|null)
@@ -116,6 +126,7 @@ window.SupaDeals = (function () {
     init,
     fetchAll,
     updateDeal,
+    deleteDeal,
     subscribe,
     rowToDeal,
     editablePatch,
