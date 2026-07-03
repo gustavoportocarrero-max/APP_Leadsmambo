@@ -126,6 +126,7 @@
       clientType: d.clientType || "",
       industry: d.industry || "",
       source: d.source || "",
+      saleType: d.saleType || "",
       closeDate: d.closeDate || "",
       comment: d.comment || "",
       status: d.status || "activo",
@@ -333,6 +334,7 @@
       ["Propietario", d.owner],
       ["Vertical", d.vertical],
       ["Cliente", d.clientType],
+      ["Tipo de venta", d.saleType],
       ["Industria", d.industry],
       ["Origen", d.source],
     ].filter(([, v]) => v);

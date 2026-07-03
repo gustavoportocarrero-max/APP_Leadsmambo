@@ -44,6 +44,7 @@ window.SupaDeals = (function () {
       clientType: r.client_type || "",
       industry: r.industry || "",
       source: r.source || "",
+      saleType: r.sale_type || "",
       closeDate: r.close_date || "",
       comment: r.comment || "",
       status: r.status || "activo",

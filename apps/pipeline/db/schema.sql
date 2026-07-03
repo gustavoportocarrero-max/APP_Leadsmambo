@@ -23,6 +23,7 @@ create table if not exists public.deals (
   client_type  text    not null default '',
   industry     text    not null default '',
   source       text    not null default '',                -- fuente lead
+  sale_type    text    not null default '',                -- tipo de venta
   close_date   date,                                       -- NULL = sin fecha
   -- auditoría
   created_at   timestamptz not null default now(),
