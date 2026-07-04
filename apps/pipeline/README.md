@@ -210,10 +210,24 @@ Sin las dos últimas → **todo se simula** (dry-run), no escribe nada. Modo seg
 `api/pipedrive-pull.js` corre server-side (por cron o manual) y trae del **pipeline 1**:
 - **nuevos** (con su `pipedrive_id` y su `add_time` real como `created_at`),
 - **actualiza** los existentes (Pipedrive manda),
-- **quita** los que quedaron ganados/perdidos o salieron del pipeline 1,
+- **quita** los que quedaron ganados/perdidos, salieron del pipeline 1, o cuyo
+  **propietario no está en la lista blanca**,
 - **respeta los pendientes**: NO pisa filas con `sync_pending = true` (cambios locales
   aún no confirmados) para no perderlos. Usa `pipedrive_id` como identificador único.
 - Cada corrida registra conteos en **Vercel → Logs** (`[pipedrive-pull]`).
+
+### Lista blanca de PROPIETARIOS (owner)
+Solo entran/actualizan los negocios cuyo **propietario** (owner, no el creador) está
+en la lista. Se filtra por `user_id` (propietario en Pipedrive), así que un negocio que
+tú creas (creador "Topless") pero asignas a un partner real (ej. Renzo) **sí entra**.
+- Lista por defecto en `DEFAULT_ALLOWED_OWNERS` (`api/pipedrive-pull.js`): Nicolás
+  Aramburú, Renzo Duarte, Cristina Mc, Guillermo Solano, Mauricio.
+- **Editable sin tocar código** con la env var `PIPEDRIVE_ALLOWED_OWNERS` (nombres o
+  IDs de Pipedrive separados por coma; si existe, reemplaza a la lista por defecto).
+- Ver los propietarios reales (id + nombre) del pipeline 1 y si están autorizados:
+  `GET /api/pipedrive-pull?key=<CRON_SECRET>&owners=1` (no sincroniza).
+- Limpieza de los ya insertados no autorizados: `db/cleanup-owners-no-autorizados.sql`
+  (trae PREVIEW antes del DELETE; respeta pendientes). El cron también los quita solo.
 
 ### Frecuencia / plan de Vercel
 - `vercel.json` trae el cron **diario** (`0 8 * * *`), que es lo máximo que permite el

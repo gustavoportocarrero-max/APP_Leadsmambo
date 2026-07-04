@@ -24,6 +24,18 @@
 const ALLOWED_PIPELINE = 1;
 const STAGE_BY_PD_ID = { 1: "target", 2: "contacto", 16: "primera", 52: "propuesta", 55: "cierre", 11: "nurturing" };
 
+// Lista blanca de PROPIETARIOS (owner) autorizados. El filtro es por PROPIETARIO,
+// NO por creador (tú creas como "Topless" pero asignas a un partner real → ese entra).
+// Editable aquí o por variable de entorno PIPEDRIVE_ALLOWED_OWNERS (nombres o IDs de
+// Pipedrive separados por coma; la env var, si existe, reemplaza a esta lista).
+const DEFAULT_ALLOWED_OWNERS = [
+  "Nicolás Aramburú",
+  "Renzo Duarte",
+  "Cristina Mc",
+  "Guillermo Solano",
+  "Mauricio",
+];
+
 // Nombre visible del campo en Pipedrive → columna de la app.
 const DEAL_FIELD_NAMES = {
   vertical: "vertical",
@@ -66,6 +78,23 @@ export default async function handler(req, res) {
   const domain = process.env.PIPEDRIVE_COMPANY_DOMAIN;
   const pdBase = domain ? `https://${domain}.pipedrive.com/api/v1` : "https://api.pipedrive.com/v1";
   const debugFields = req.query && req.query.fields === "1";
+  const debugOwners = req.query && req.query.owners === "1";
+
+  // ---- Lista blanca de PROPIETARIOS ----
+  const allowedRaw = (process.env.PIPEDRIVE_ALLOWED_OWNERS
+    ? process.env.PIPEDRIVE_ALLOWED_OWNERS.split(",")
+    : DEFAULT_ALLOWED_OWNERS).map((s) => s.trim()).filter(Boolean);
+  const allowedNames = new Set(allowedRaw.filter((s) => !/^\d+$/.test(s)).map((s) => norm(s)));
+  const allowedIds = new Set(allowedRaw.filter((s) => /^\d+$/.test(s)).map((s) => String(s)));
+  // OWNER (no creador): en la API v1 el propietario es user_id; el creador es creator_user_id.
+  const ownerNameOf = (d) => (d.owner_name || (d.user_id && d.user_id.name) || "").toString();
+  const ownerIdOf = (d) => {
+    const u = d.user_id;
+    if (u && typeof u === "object") return String(u.value != null ? u.value : (u.id != null ? u.id : ""));
+    return u != null ? String(u) : "";
+  };
+  const ownerAllowed = (d) =>
+    allowedNames.has(norm(ownerNameOf(d))) || (allowedIds.size > 0 && allowedIds.has(ownerIdOf(d)));
 
   const pd = async (path, params = {}) => {
     const u = new URL(pdBase + path);
@@ -118,6 +147,41 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Trae todos los negocios del pipeline 1 (paginado).
+  async function fetchP1Deals() {
+    const out = [];
+    let s = 0;
+    for (let g = 0; g < 100; g++) {
+      const j = await pd(`/pipelines/${ALLOWED_PIPELINE}/deals`, { status: "all_not_deleted", limit: "100", start: String(s) });
+      (j.data || []).forEach((d) => out.push(d));
+      const pag = j.additional_data && j.additional_data.pagination;
+      if (pag && pag.more_items_in_collection) s = pag.next_start; else break;
+    }
+    return out;
+  }
+
+  // ---- Modo debug: listar PROPIETARIOS (id + nombre) del pipeline 1 (no sincroniza) ----
+  if (debugOwners) {
+    try {
+      const abiertos = (await fetchP1Deals()).filter((d) => d.status === "open");
+      const map = {};
+      abiertos.forEach((d) => {
+        const idn = ownerIdOf(d), name = ownerNameOf(d);
+        const k = idn + "|" + name;
+        if (!map[k]) map[k] = { owner_id: idn, owner: name, negocios: 0, autorizado: ownerAllowed(d) };
+        map[k].negocios++;
+      });
+      res.status(200).json({
+        ok: true,
+        lista_blanca: allowedRaw,
+        propietarios: Object.values(map).sort((a, b) => b.negocios - a.negocios),
+      });
+    } catch (e) {
+      res.status(502).json({ ok: false, error: String(e && e.message ? e.message : e) });
+    }
+    return;
+  }
+
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!sbUrl || !sbKey) { res.status(500).json({ ok: false, error: "Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY." }); return; }
@@ -146,18 +210,14 @@ export default async function handler(req, res) {
     }
 
     // 1) Traer negocios del pipeline 1 (paginado)
-    const pdDeals = [];
-    let start = 0;
-    for (let g = 0; g < 100; g++) {
-      const j = await pd(`/pipelines/${ALLOWED_PIPELINE}/deals`, { status: "all_not_deleted", limit: "100", start: String(start) });
-      (j.data || []).forEach((d) => pdDeals.push(d));
-      const pag = j.additional_data && j.additional_data.pagination;
-      if (pag && pag.more_items_in_collection) start = pag.next_start; else break;
-    }
+    const pdDeals = await fetchP1Deals();
 
     const inP1 = pdDeals.filter((d) => Number(d.pipeline_id) === ALLOWED_PIPELINE);
     const openDeals = inP1.filter((d) => d.status === "open");
-    const openIds = new Set(openDeals.map((d) => Number(d.id)));
+    // FILTRO LISTA BLANCA: solo negocios cuyo PROPIETARIO está autorizado.
+    const allowedOpen = openDeals.filter(ownerAllowed);
+    const allowedOpenIds = new Set(allowedOpen.map((d) => Number(d.id)));
+    const filteredOut = openDeals.length - allowedOpen.length;
 
     // 2) Estado actual en Supabase
     const existing = await (await sb("deals?select=pipedrive_id,sync_pending&pipedrive_id=not.is.null")).json();
@@ -170,7 +230,7 @@ export default async function handler(req, res) {
 
     const toUpsert = [];
     let newCount = 0, updCount = 0, skipCount = 0;
-    for (const d of openDeals) {
+    for (const d of allowedOpen) {
       const pid = Number(d.id);
       if (pendingPids.has(pid)) { skipCount++; continue; }
       const addTime = d.add_time ? d.add_time.replace(" ", "T") + "Z" : null;
@@ -205,8 +265,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Borrar cerrados / fuera del pipeline 1 (respetando pendientes)
-    const toDelete = [...existingPids].filter((pid) => !openIds.has(pid) && !pendingPids.has(pid));
+    // 4) Borrar de la app los que ya NO deben estar (respetando pendientes):
+    //    cerrados, fuera del pipeline 1, o cuyo propietario NO está autorizado.
+    const toDelete = [...existingPids].filter((pid) => !allowedOpenIds.has(pid) && !pendingPids.has(pid));
     let delCount = 0;
     for (let i = 0; i < toDelete.length; i += 100) {
       const chunk = toDelete.slice(i, i + 100);
@@ -218,9 +279,12 @@ export default async function handler(req, res) {
       ok: true,
       pipeline: ALLOWED_PIPELINE,
       abiertos: openDeals.length,
+      abiertos_autorizados: allowedOpen.length,
+      filtrados_por_propietario: filteredOut,
+      lista_blanca: allowedRaw,
       nuevos: newCount,
       actualizados: updCount,
-      quitados_por_cierre: delCount,
+      quitados: delCount,
       saltados_por_pendientes: skipCount,
       campos_descriptivos: {
         mapeados: ["vertical", "client_type", "sale_type", "source", "industry"].filter((c) => fields[c]),
