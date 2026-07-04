@@ -216,10 +216,13 @@ Sin las dos últimas → **todo se simula** (dry-run), no escribe nada. Modo seg
 - Cada corrida registra conteos en **Vercel → Logs** (`[pipedrive-pull]`).
 
 ### Frecuencia / plan de Vercel
-- `vercel.json` trae el cron cada 2h (`0 */2 * * *`) → funciona en **Vercel Pro**.
-- En **Hobby (gratis)** el cron es ~1/día. Alternativa gratis: un **cron externo**
-  (cron-job.org, UptimeRobot, GitHub Actions) que llame cada 2h a
-  `https://TU-APP.vercel.app/api/pipedrive-pull?key=<CRON_SECRET>`.
+- `vercel.json` trae el cron **diario** (`0 8 * * *`), que es lo máximo que permite el
+  plan **Hobby (gratis)**. OJO: poner un cron más frecuente que 1/día en Hobby **hace
+  fallar el deploy** (y entonces el endpoint no se publica → 404).
+- Para correr **cada 2h**: usa un **cron externo gratis** (cron-job.org, UptimeRobot,
+  GitHub Actions) que llame a
+  `https://TU-APP.vercel.app/api/pipedrive-pull?key=<CRON_SECRET>`. En **Vercel Pro**
+  puedes cambiar el schedule a `0 */2 * * *` directamente.
 
 ### Variables de entorno (además de las de salida)
 | Nombre | Para qué |
