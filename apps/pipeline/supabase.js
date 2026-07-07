@@ -61,6 +61,7 @@ window.SupaDeals = (function () {
       comment: d.comment,
       status: d.status,
       loss_reason: d.lossReason || "",
+      close_date: d.closeDate ? d.closeDate : null, // "" → null (columna date)
     };
   }
 

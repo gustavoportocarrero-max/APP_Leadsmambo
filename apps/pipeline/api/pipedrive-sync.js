@@ -127,6 +127,8 @@ export default async function handler(req, res) {
   }
   if ("amount" in changes) body.value = Number(changes.amount) || 0;
   if ("prob" in changes) body.probability = (changes.prob === null || changes.prob === "") ? null : Number(changes.prob);
+  // Fecha de cierre: "YYYY-MM-DD" (último día del mes) o null para limpiarla.
+  if ("closeDate" in changes) body.expected_close_date = changes.closeDate ? changes.closeDate : null;
   if ("status" in changes) {
     if (changes.status === "ganado") body.status = "won";
     else if (changes.status === "perdido") { body.status = "lost"; body.lost_reason = changes.lossReason || ""; }
@@ -184,7 +186,8 @@ export default async function handler(req, res) {
     if ("stage_id" in body && after.stage_id !== body.stage_id) confirmed = false;
     if ("status" in body && after.status !== body.status) confirmed = false;
     if ("value" in body && Number(after.value) !== Number(body.value)) confirmed = false; // p.ej. deals con productos no aceptan value
-    applied = { stage_id: after.stage_id, value: after.value, probability: after.probability, status: after.status };
+    if ("expected_close_date" in body && body.expected_close_date && after.expected_close_date !== body.expected_close_date) confirmed = false;
+    applied = { stage_id: after.stage_id, value: after.value, probability: after.probability, status: after.status, expected_close_date: after.expected_close_date };
   }
 
   // 5) Crear la nota (si hay comentario nuevo) — POST /notes con deal_id

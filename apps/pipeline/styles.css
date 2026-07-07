@@ -374,6 +374,22 @@ input, select, textarea { font-family: inherit; }
 .field .input.mono { font-family: var(--font-mono); }
 .field textarea { resize: vertical; min-height: 76px; line-height: 1.4; }
 
+/* fecha de cierre: mes + año lado a lado */
+.date-my { display: flex; gap: var(--s-3); }
+.date-my select {
+  flex: 1; min-width: 0;
+  height: 46px; padding: 0 var(--s-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  color: var(--ink); font-size: 15px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B6582' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+.date-my select:disabled { opacity: 0.6; }
+
 .amount-field { position: relative; }
 .amount-field .prefix {
   position: absolute; left: 14px; top: 50%; transform: translateY(-50%);

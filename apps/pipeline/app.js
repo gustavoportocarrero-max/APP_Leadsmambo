@@ -62,6 +62,8 @@
     probInput: $("probInput"),
     probVal: $("probVal"),
     commentInput: $("commentInput"),
+    closeMonth: $("closeMonth"),
+    closeYear: $("closeYear"),
     resultSeg: $("resultSeg"),
     wonHint: $("wonHint"),
     lossReasons: $("lossReasons"),
@@ -164,6 +166,49 @@
     return name.split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
   }
   function probText(p) { return p === null ? "—" : p + "%"; }
+
+  /* ---------- Fecha de cierre: solo mes/año ---------- */
+  const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const pad2 = (n) => String(n).padStart(2, "0");
+  // Último día del mes (month 1–12). Correcto para 30/31 y bisiestos.
+  function lastDayOfMonth(year, month) { return new Date(year, month, 0).getDate(); }
+  // "YYYY-MM-DD" → "Julio 2026" (día no se muestra); "" si vacío.
+  function fmtMonthYear(dateStr) {
+    if (!dateStr || !/^\d{4}-\d{2}/.test(dateStr)) return "";
+    const [y, m] = dateStr.split("-");
+    return (MONTHS_ES[Number(m) - 1] || m) + " " + y;
+  }
+  function populateCloseSelects() {
+    els.closeMonth.innerHTML = '<option value="">— Mes —</option>' +
+      MONTHS_ES.map((name, i) => `<option value="${i + 1}">${name}</option>`).join("");
+    const now = new Date().getFullYear();
+    const years = [];
+    for (let y = now - 2; y <= now + 5; y++) years.push(y);
+    els.closeYear.innerHTML = '<option value="">— Año —</option>' +
+      years.map((y) => `<option value="${y}">${y}</option>`).join("");
+  }
+  function ensureYearOption(y) {
+    if (![...els.closeYear.options].some((o) => o.value === String(y)))
+      els.closeYear.insertAdjacentHTML("beforeend", `<option value="${y}">${y}</option>`);
+  }
+  function setCloseDateUI(dateStr) {
+    if (dateStr && /^\d{4}-\d{2}/.test(dateStr)) {
+      const [y, m] = dateStr.split("-");
+      ensureYearOption(Number(y));
+      els.closeMonth.value = String(Number(m));
+      els.closeYear.value = String(Number(y));
+    } else {
+      els.closeMonth.value = "";
+      els.closeYear.value = "";
+    }
+  }
+  // draft.closeDate = último día del mes elegido; "" si falta mes o año (sin fecha).
+  function updateCloseDraft() {
+    const m = els.closeMonth.value, y = els.closeYear.value;
+    if (m && y) draft.closeDate = `${y}-${pad2(Number(m))}-${pad2(lastDayOfMonth(Number(y), Number(m)))}`;
+    else draft.closeDate = "";
+  }
 
   /* ============================================================
      Identidad — selector "¿Quién eres?"
@@ -352,6 +397,7 @@
     els.probInput.value = draft.prob === null ? 0 : draft.prob;
     updateProbLabel(draft.prob);
     els.commentInput.value = draft.comment || "";
+    setCloseDateUI(draft.closeDate);
 
     setReadonlyUI(!draftEditable, d.owner);
     setResultUI();
@@ -377,6 +423,8 @@
     els.amountInput.disabled = readonly;
     els.probInput.disabled = readonly;
     els.commentInput.disabled = readonly;
+    els.closeMonth.disabled = readonly;
+    els.closeYear.disabled = readonly;
     els.resultSeg.querySelectorAll(".seg").forEach((b) => { b.disabled = readonly; });
     if (readonly) {
       els.readonlyNotice.hidden = false;
@@ -448,6 +496,7 @@
     if (d.stage !== orig.stage) c.stage = d.stage;
     if (d.amount !== orig.amount) c.amount = d.amount;
     if (d.prob !== orig.prob) c.prob = d.prob;
+    if ((d.closeDate || "") !== (orig.closeDate || "")) c.closeDate = d.closeDate || "";
     if (d.status !== orig.status) {
       c.status = d.status;
       if (d.status === "perdido") c.lossReason = d.lossReason || "";
@@ -758,6 +807,8 @@
     els.commentInput.addEventListener("input", (e) => {
       if (draftEditable) draft.comment = e.target.value;
     });
+    els.closeMonth.addEventListener("change", () => { if (draftEditable) updateCloseDraft(); });
+    els.closeYear.addEventListener("change", () => { if (draftEditable) updateCloseDraft(); });
 
     els.resultSeg.addEventListener("click", (e) => {
       if (!draftEditable) return;
@@ -829,6 +880,7 @@
 
   async function init() {
     renderStageChips();
+    populateCloseSelects();
     bindEvents();
     updateIdentityChip();
     await boot();
