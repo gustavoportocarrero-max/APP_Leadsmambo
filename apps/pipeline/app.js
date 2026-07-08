@@ -13,6 +13,8 @@
   const STORAGE_PENDING_META = "mambo.pipeline.pendingmeta"; // qué quedó sin confirmar por negocio
   const STORAGE_DEMO = "mambo.pipeline.demo"; // overrides locales cuando no hay Supabase
   const stageById = Object.fromEntries(STAGES.map((s) => [s.id, s]));
+  // Etapas que cuentan para "EN JUEGO" (excluye Target y Nurturing a propósito).
+  const IN_PLAY_STAGES = new Set(["contacto", "primera", "propuesta", "cierre"]);
 
   /* ---------- estado ---------- */
   let deals = [];
@@ -268,9 +270,14 @@
     els.changeCount.textContent = n;
     els.statChanges.classList.toggle("changed", n > 0);
 
-    // "En juego" = solo negocios en curso (excluye ganados y perdidos)
+    // "EN JUEGO": suma SOLO las 4 etapas de IN_PLAY_STAGES (nunca Target ni Nurturing),
+    // acotado por el partner de "¿Quién eres?" (currentUser) — NO por el filtro de
+    // abajo (filters.owner). Sin partner elegido → total de todos los partners.
     const total = deals
-      .filter((d) => d.status === "activo")
+      .filter((d) =>
+        d.status === "activo" &&
+        IN_PLAY_STAGES.has(d.stage) &&
+        (!currentUser || d.owner === currentUser))
       .reduce((sum, d) => sum + (d.amount || 0), 0);
     els.totalAmount.textContent = fmtMoney(total);
   }
