@@ -389,6 +389,7 @@ input, select, textarea { font-family: inherit; }
   background-position: right 14px center;
 }
 .date-my select:disabled { opacity: 0.6; }
+.date-current { margin-top: var(--s-2); font-size: 12px; font-weight: 600; color: var(--ink-soft); }
 
 .amount-field { position: relative; }
 .amount-field .prefix {

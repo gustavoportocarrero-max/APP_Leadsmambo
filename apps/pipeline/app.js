@@ -66,6 +66,7 @@
     commentInput: $("commentInput"),
     closeMonth: $("closeMonth"),
     closeYear: $("closeYear"),
+    closeCurrent: $("closeCurrent"),
     resultSeg: $("resultSeg"),
     wonHint: $("wonHint"),
     lossReasons: $("lossReasons"),
@@ -173,6 +174,8 @@
   const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const pad2 = (n) => String(n).padStart(2, "0");
+  // Años disponibles en el selector. Editar aquí para agregar/quitar años.
+  const CLOSE_YEARS = [2026, 2027];
   // Último día del mes (month 1–12). Correcto para 30/31 y bisiestos.
   function lastDayOfMonth(year, month) { return new Date(year, month, 0).getDate(); }
   // "YYYY-MM-DD" → "Julio 2026" (día no se muestra); "" si vacío.
@@ -184,22 +187,27 @@
   function populateCloseSelects() {
     els.closeMonth.innerHTML = '<option value="">— Mes —</option>' +
       MONTHS_ES.map((name, i) => `<option value="${i + 1}">${name}</option>`).join("");
-    const now = new Date().getFullYear();
-    const years = [];
-    for (let y = now - 2; y <= now + 5; y++) years.push(y);
     els.closeYear.innerHTML = '<option value="">— Año —</option>' +
-      years.map((y) => `<option value="${y}">${y}</option>`).join("");
-  }
-  function ensureYearOption(y) {
-    if (![...els.closeYear.options].some((o) => o.value === String(y)))
-      els.closeYear.insertAdjacentHTML("beforeend", `<option value="${y}">${y}</option>`);
+      CLOSE_YEARS.map((y) => `<option value="${y}">${y}</option>`).join("");
   }
   function setCloseDateUI(dateStr) {
+    els.closeCurrent.hidden = true;
     if (dateStr && /^\d{4}-\d{2}/.test(dateStr)) {
       const [y, m] = dateStr.split("-");
-      ensureYearOption(Number(y));
-      els.closeMonth.value = String(Number(m));
-      els.closeYear.value = String(Number(y));
+      if (CLOSE_YEARS.includes(Number(y))) {
+        // Año dentro de la lista → se muestra en los desplegables normalmente.
+        els.closeMonth.value = String(Number(m));
+        els.closeYear.value = String(Number(y));
+      } else {
+        // Año fuera de la lista (p. ej. 2025/2028 traído de Pipedrive): los
+        // desplegables quedan limpios (solo ofrecen 2026/2027) y mostramos la
+        // fecha guardada como texto para no perderla ni romper nada.
+        els.closeMonth.value = "";
+        els.closeYear.value = "";
+        els.closeCurrent.hidden = false;
+        els.closeCurrent.textContent = "Fecha guardada: " + fmtMonthYear(dateStr) +
+          " · elige mes y año para cambiarla";
+      }
     } else {
       els.closeMonth.value = "";
       els.closeYear.value = "";
@@ -207,6 +215,7 @@
   }
   // draft.closeDate = último día del mes elegido; "" si falta mes o año (sin fecha).
   function updateCloseDraft() {
+    els.closeCurrent.hidden = true; // al interactuar, se oculta la nota de "fecha guardada"
     const m = els.closeMonth.value, y = els.closeYear.value;
     if (m && y) draft.closeDate = `${y}-${pad2(Number(m))}-${pad2(lastDayOfMonth(Number(y), Number(m)))}`;
     else draft.closeDate = "";
