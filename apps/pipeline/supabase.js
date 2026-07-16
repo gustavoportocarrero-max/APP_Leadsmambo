@@ -15,6 +15,7 @@ window.SupaDeals = (function () {
 
   let client = null;
   let ready = false;
+  let allowedDomain = "";
 
   async function getConfig() {
     if (window.__SUPABASE_CONFIG__ && window.__SUPABASE_CONFIG__.url) {
@@ -69,10 +70,35 @@ window.SupaDeals = (function () {
     const cfg = await getConfig();
     if (!cfg || !window.supabase) return false;
     client = window.supabase.createClient(cfg.url, cfg.anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
       realtime: { params: { eventsPerSecond: 5 } },
     });
+    allowedDomain = cfg.allowedDomain || "";
     ready = true;
     return true;
+  }
+
+  /* ---------- Auth (login con Google) ---------- */
+  async function getUser() {
+    if (!client) return null;
+    const { data } = await client.auth.getSession();
+    return (data && data.session && data.session.user) ? data.session.user : null;
+  }
+  async function signInWithGoogle(redirectTo, hostedDomain) {
+    if (!client) throw new Error("Supabase no inicializado");
+    const options = { redirectTo };
+    if (hostedDomain) options.queryParams = { hd: hostedDomain }; // sugiere el dominio a Google (no es garantía)
+    return client.auth.signInWithOAuth({ provider: "google", options });
+  }
+  async function signOut() {
+    if (client) await client.auth.signOut();
+  }
+  // cb(user|null) en cada cambio de sesión (incluye la sesión inicial)
+  function onAuth(cb) {
+    if (!client) return;
+    client.auth.onAuthStateChange((_event, session) => {
+      cb(session && session.user ? session.user : null);
+    });
   }
 
   async function fetchAll() {
@@ -132,6 +158,11 @@ window.SupaDeals = (function () {
     subscribe,
     rowToDeal,
     editablePatch,
+    getUser,
+    signInWithGoogle,
+    signOut,
+    onAuth,
+    get allowedDomain() { return allowedDomain; },
     get ready() { return ready; },
   };
 })();

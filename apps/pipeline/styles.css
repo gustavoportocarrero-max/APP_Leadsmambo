@@ -650,6 +650,54 @@ input[type="range"]::-moz-range-thumb {
   font-size: 13px; font-weight: 700;
 }
 
+/* ============================================================
+   LOGIN (pantalla bloqueante) + cuenta
+   ============================================================ */
+.login-screen {
+  position: fixed; inset: 0; z-index: 90;
+  background: var(--eggplant);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--s-5);
+}
+.login-screen[hidden] { display: none; }
+.login-card {
+  width: 100%; max-width: 380px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: var(--s-6) var(--s-5);
+  text-align: center;
+  box-shadow: var(--shadow-2);
+}
+.login-wordmark { font-size: 26px; margin-bottom: var(--s-2); }
+.login-sub { color: var(--ink-soft); font-size: 14px; font-weight: 600; margin-bottom: var(--s-6); }
+.google-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-3);
+  width: 100%; min-height: 50px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised); color: var(--ink);
+  font-weight: 800; font-size: 15px;
+  transition: transform var(--t-fast) var(--ease-snap);
+}
+.google-btn:active { transform: scale(0.98); }
+.login-error {
+  margin-top: var(--s-4);
+  background: var(--pink-mist); color: var(--coral);
+  border: 1px solid rgba(250, 84, 120, 0.35);
+  border-radius: var(--r-md);
+  padding: 12px var(--s-4);
+  font-size: 13px; font-weight: 700;
+}
+.login-error[hidden] { display: none; }
+
+.account-row {
+  display: flex; justify-content: space-between; gap: var(--s-3);
+  padding: 10px 0; border-bottom: 1px solid var(--hairline);
+  font-size: 14px; font-weight: 700;
+}
+.account-row:last-of-type { border-bottom: none; }
+.account-k { color: var(--ink-soft); font-weight: 600; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

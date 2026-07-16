@@ -60,21 +60,23 @@ create trigger trg_deals_updated_at
 -- login y se endurecen estas políticas.
 alter table public.deals enable row level security;
 
+-- Piloto: acceso abierto a anon + authenticated (el control real es el login por
+-- dominio en la app). Si luego quieres endurecer, restringe a authenticated.
 drop policy if exists deals_select_anon on public.deals;
 create policy deals_select_anon on public.deals
-  for select to anon using (true);
+  for select to anon, authenticated using (true);
 
 drop policy if exists deals_update_anon on public.deals;
 create policy deals_update_anon on public.deals
-  for update to anon using (true) with check (true);
+  for update to anon, authenticated using (true) with check (true);
 
 drop policy if exists deals_insert_anon on public.deals;
 create policy deals_insert_anon on public.deals
-  for insert to anon with check (true);
+  for insert to anon, authenticated with check (true);
 
 drop policy if exists deals_delete_anon on public.deals;
 create policy deals_delete_anon on public.deals
-  for delete to anon using (true);
+  for delete to anon, authenticated using (true);
 
 -- 4) Realtime: emitir cambios de la tabla ------------------------------
 alter table public.deals replica identity full;

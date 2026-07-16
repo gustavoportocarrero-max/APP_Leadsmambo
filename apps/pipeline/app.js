@@ -23,6 +23,11 @@
   let draft = null;         // copia de trabajo del negocio en edición
   let draftEditable = false;// si el usuario actual puede editar el draft
   let mode = "demo";        // "supabase" | "demo"
+  let authRequired = false; // true cuando hay Supabase (login obligatorio)
+  let currentEmail = "";    // correo de la sesión Google (identidad real)
+  let dataLoaded = false;   // datos ya cargados tras autenticar
+  let authError = "";       // mensaje a mostrar en el login (p.ej. dominio no permitido)
+  // En modo demo (sin Supabase) se conserva el selector manual "¿Quién eres?".
   let currentUser = localStorage.getItem(STORAGE_USER) || "";
   // pendingIds = negocios con cambios PENDIENTES de confirmar en Pipedrive.
   // Un guardado confirmado en Pipedrive saca al negocio de aquí (queda en 0);
@@ -51,6 +56,14 @@
     identityName: $("identityName"),
     identityOverlay: $("identityOverlay"),
     ownerList: $("ownerList"),
+    accountOverlay: $("accountOverlay"),
+    accEmail: $("accEmail"),
+    accPartner: $("accPartner"),
+    logoutBtn: $("logoutBtn"),
+    accountCloseBtn: $("accountCloseBtn"),
+    loginScreen: $("loginScreen"),
+    googleBtn: $("googleBtn"),
+    loginError: $("loginError"),
     // detalle
     detail: $("detail"),
     detailBody: $("detailBody"),
@@ -257,8 +270,63 @@
     toast("Editas como: " + name);
   }
   function updateIdentityChip() {
-    els.identityAvatar.textContent = initials(currentUser);
-    els.identityName.textContent = currentUser || "¿Quién eres?";
+    els.identityAvatar.textContent = initials(currentUser || currentEmail);
+    els.identityName.textContent = currentUser || (authRequired ? (currentEmail || "Cuenta") : "¿Quién eres?");
+  }
+
+  /* ============================================================
+     Login con Google (Supabase Auth) + cuenta
+     ============================================================ */
+  function showLogin(errorMsg) {
+    els.loginScreen.hidden = false;
+    if (errorMsg) { els.loginError.hidden = false; els.loginError.textContent = errorMsg; }
+    else { els.loginError.hidden = true; els.loginError.textContent = ""; }
+  }
+  function hideLogin() { els.loginScreen.hidden = true; }
+
+  function showAccount() {
+    els.accEmail.textContent = currentEmail || "—";
+    els.accPartner.textContent = currentUser || "(no asignado — solo lectura)";
+    els.accountOverlay.classList.add("open");
+    els.accountOverlay.setAttribute("aria-hidden", "false");
+  }
+  function hideAccount() {
+    els.accountOverlay.classList.remove("open");
+    els.accountOverlay.setAttribute("aria-hidden", "true");
+  }
+
+  // Reacciona a la sesión: gate por dominio + identidad por correo.
+  async function handleAuth(user) {
+    if (!user) {
+      currentUser = ""; currentEmail = ""; updateIdentityChip();
+      showLogin(authError); authError = "";
+      return;
+    }
+    const email = String(user.email || "").toLowerCase().trim();
+    const domain = SupaDeals.allowedDomain || (typeof ALLOWED_DOMAIN !== "undefined" ? ALLOWED_DOMAIN : "mambo.pe");
+    if (!emailDomainAllowed(email, domain)) {
+      authError = `Acceso restringido al equipo de Mambo. El correo ${email} no pertenece a @${domain}.`;
+      await SupaDeals.signOut(); // dispara handleAuth(null) → muestra el login con el error
+      return;
+    }
+    // Autorizado
+    hideLogin();
+    currentEmail = email;
+    currentUser = partnerForEmail(email); // "" si no está mapeado → solo lectura
+    updateIdentityChip();
+    if (!dataLoaded) {
+      try {
+        deals = await SupaDeals.fetchAll();
+        SupaDeals.subscribe(onRealtime);
+        dataLoaded = true;
+        pruneAndRender();
+      } catch (e) {
+        console.error("Error leyendo Supabase tras login:", e);
+        showBanner("No se pudieron cargar los datos. Recarga la página.");
+      }
+    } else {
+      renderAll();
+    }
   }
 
   /* ============================================================
@@ -792,12 +860,26 @@
       renderList();
     });
 
-    // identidad
-    els.identityChip.addEventListener("click", showIdentity);
+    // identidad: con login → panel de cuenta; en demo → selector manual
+    els.identityChip.addEventListener("click", () => { authRequired ? showAccount() : showIdentity(); });
     els.ownerList.addEventListener("click", (e) => {
       const b = e.target.closest(".id-owner");
       if (b) chooseUser(b.dataset.owner);
     });
+    // login / logout
+    els.googleBtn.addEventListener("click", async () => {
+      els.googleBtn.disabled = true;
+      const redirectTo = window.location.origin + window.location.pathname;
+      const domain = SupaDeals.allowedDomain || (typeof ALLOWED_DOMAIN !== "undefined" ? ALLOWED_DOMAIN : "");
+      try { await SupaDeals.signInWithGoogle(redirectTo, domain); }
+      catch (e) { console.error(e); showLogin("No se pudo iniciar sesión. Reintenta."); els.googleBtn.disabled = false; }
+    });
+    els.logoutBtn.addEventListener("click", async () => {
+      hideAccount();
+      dataLoaded = false;
+      await SupaDeals.signOut(); // onAuth(null) → showLogin
+    });
+    els.accountCloseBtn.addEventListener("click", hideAccount);
 
     // detalle: etapa (solo si editable)
     els.stageGrid.addEventListener("click", (e) => {
@@ -862,36 +944,35 @@
   /* ============================================================
      Arranque
      ============================================================ */
+  // Limpia pendientes huérfanos y pinta. Se usa tras cargar datos (login o demo).
+  function pruneAndRender() {
+    const validIds = new Set(deals.map((d) => d.id));
+    [...pendingIds].forEach((id) => { if (!validIds.has(id)) pendingIds.delete(id); });
+    Object.keys(pendingMeta).forEach((k) => { if (!validIds.has(Number(k))) delete pendingMeta[k]; });
+    savePending(); savePendingMeta();
+    renderOwnerFilter();
+    renderAll();
+  }
+
   async function boot() {
     let connected = false;
     try { connected = await SupaDeals.init(); } catch (e) { console.error(e); }
 
     if (connected) {
-      try {
-        deals = await SupaDeals.fetchAll();
-        mode = "supabase";
-        SupaDeals.subscribe(onRealtime);
-        hideBanner();
-      } catch (e) {
-        console.error("Error leyendo Supabase:", e);
-        deals = seedDemoDeals();
-        mode = "demo";
-        showBanner("No se pudo leer Supabase. Mostrando datos locales (modo demo).");
-      }
+      // Con Supabase → LOGIN OBLIGATORIO. handleAuth carga los datos al autenticar.
+      mode = "supabase";
+      authRequired = true;
+      hideBanner();
+      SupaDeals.onAuth(handleAuth); // dispara la sesión inicial y cada cambio (incl. redirect de Google)
     } else {
-      deals = seedDemoDeals();
+      // Sin Supabase → modo demo local (sin login), conserva el selector manual.
       mode = "demo";
+      authRequired = false;
+      deals = seedDemoDeals();
       showBanner("Modo demo (sin Supabase). Configura las variables de entorno para datos compartidos.");
+      pruneAndRender();
+      if (!currentUser) showIdentity();
     }
-
-    // limpiar pendientes que ya no existen
-    const validIds = new Set(deals.map((d) => d.id));
-    [...pendingIds].forEach((id) => { if (!validIds.has(id)) pendingIds.delete(id); });
-    Object.keys(pendingMeta).forEach((k) => { if (!validIds.has(Number(k))) delete pendingMeta[k]; });
-    savePending(); savePendingMeta();
-
-    renderOwnerFilter();
-    renderAll();
   }
 
   async function init() {
@@ -900,7 +981,6 @@
     bindEvents();
     updateIdentityChip();
     await boot();
-    if (!currentUser) showIdentity();
   }
 
   document.addEventListener("DOMContentLoaded", init);

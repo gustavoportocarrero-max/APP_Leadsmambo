@@ -53,6 +53,38 @@ const OWNERS = [
   "Topless"
 ];
 
+// ============================================================
+// AUTENTICACIÓN (login con Google vía Supabase Auth)
+// ============================================================
+// Dominio permitido: solo correos de este dominio pueden entrar.
+// (También se puede sobreescribir con la env var ALLOWED_EMAIL_DOMAIN en Vercel,
+//  que llega por /api/config; esta constante es el valor por defecto.)
+const ALLOWED_DOMAIN = "mambo.pe";
+
+// Mapeo CORREO → PARTNER. Reemplaza cada correo por el real de cada partner.
+// La clave (correo) debe ir en minúsculas. El valor debe coincidir EXACTO con el
+// nombre del propietario que usa la lógica de edición y el filtro (los de OWNERS).
+const EMAIL_TO_PARTNER = {
+  "nicolas@mambo.pe": "Nicolás Aramburú",
+  "renzo@mambo.pe": "Renzo Duarte",
+  "cristina@mambo.pe": "Cristina Mc",
+  "guillermo@mambo.pe": "Guillermo Solano",
+  "mauricio@mambo.pe": "Mauricio",
+};
+
+// ¿El correo pertenece al dominio permitido?
+function emailDomainAllowed(email, domain) {
+  const d = String(domain || ALLOWED_DOMAIN).toLowerCase().trim();
+  return typeof email === "string" && email.toLowerCase().trim().endsWith("@" + d);
+}
+// Partner asociado a un correo (o "" si no está mapeado → solo lectura).
+function partnerForEmail(email) {
+  return EMAIL_TO_PARTNER[String(email || "").toLowerCase().trim()] || "";
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SEED_DEALS, STAGES, LOSS_REASONS, SEED_VERSION, OWNERS };
+  module.exports = {
+    SEED_DEALS, STAGES, LOSS_REASONS, SEED_VERSION, OWNERS,
+    ALLOWED_DOMAIN, EMAIL_TO_PARTNER, emailDomainAllowed, partnerForEmail,
+  };
 }

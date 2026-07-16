@@ -250,6 +250,57 @@ Abre en el navegador: `https://TU-APP.vercel.app/api/pipedrive-pull?key=<CRON_SE
 → corre una vez y devuelve un resumen JSON: `{ nuevos, actualizados, quitados_por_cierre,
 saltados_por_pendientes, ... }`. También lo ves en **Vercel → Logs**.
 
+## Login con Google (Supabase Auth)
+
+Con Supabase configurado, la app **exige iniciar sesión con Google** y solo deja entrar
+correos del dominio permitido (por defecto `mambo.pe`). La identidad del login es la
+fuente de verdad de "quién es" (reemplaza el selector manual, que queda solo para el
+modo demo sin Supabase). Hay botón **Cerrar sesión** en el chip de arriba a la derecha.
+
+### Configurable
+- **Dominio permitido:** env var `ALLOWED_EMAIL_DOMAIN` en Vercel (o la constante
+  `ALLOWED_DOMAIN` en `data.js`). Por defecto `mambo.pe`.
+- **Mapeo correo → partner:** constante `EMAIL_TO_PARTNER` en `data.js`. Reemplaza los
+  correos de ejemplo por los reales de cada partner (la clave en minúsculas; el valor
+  debe coincidir EXACTO con el nombre del propietario). Un correo `@mambo.pe` que entre
+  pero no esté mapeado queda en **solo lectura**.
+
+### Qué configuras tú (paso a paso)
+**A) Google Cloud Console** (crear credenciales OAuth):
+1. console.cloud.google.com → crea/elige un proyecto.
+2. "APIs y servicios" → "Pantalla de consentimiento OAuth" → tipo **Interno** (si tu
+   Google Workspace es mambo.pe) o Externo; completa nombre y correo de soporte.
+3. "Credenciales" → "Crear credenciales" → "ID de cliente de OAuth" → tipo
+   **Aplicación web**.
+4. En **URIs de redireccionamiento autorizados** pega **la URL de callback de Supabase**:
+   `https://<TU-PROYECTO>.supabase.co/auth/v1/callback` (la ves en Supabase, paso B).
+5. Guarda y copia el **Client ID** y el **Client secret**.
+
+**B) Supabase** (activar el proveedor Google):
+1. Dashboard → **Authentication → Providers → Google** → actívalo.
+2. Pega el **Client ID** y **Client secret** de Google. Ahí mismo se muestra la
+   **Callback URL** que usaste en el paso A4.
+3. **Authentication → URL Configuration**: en **Site URL** y **Redirect URLs** agrega la
+   URL de tu app: `https://TU-APP.vercel.app` (y `http://localhost:4321` si pruebas local).
+4. **SQL Editor** → corre `db/migration-004-auth-rls.sql` (deja que los usuarios
+   autenticados puedan leer/escribir; sin esto, la app deja de cargar tras el login).
+
+**C) Vercel** (opcional): si el dominio no es mambo.pe, crea env var
+`ALLOWED_EMAIL_DOMAIN`. Edita `EMAIL_TO_PARTNER` en `data.js` con los correos reales.
+Redeploy.
+
+### Cómo probar
+- Entra a la app → debe aparecer la pantalla **"Iniciar sesión con Google"**.
+- Inicia con un correo **@mambo.pe** → entra y arriba a la derecha aparece tu partner.
+- Cierra sesión, inicia con un **@gmail.com** (u otro dominio) → se rechaza con
+  **"Acceso restringido al equipo de Mambo…"** y no deja entrar.
+- (La comprobación de dominio y el mapeo se validaron en local con
+  `emailDomainAllowed()` / `partnerForEmail()`; el flujo OAuth real se prueba en el deploy.)
+
+> Nota de seguridad: el gate de dominio es del lado de la app (piloto). Las políticas RLS
+> quedan abiertas a anon+authenticated; si luego quieres endurecer, se restringe a
+> `authenticated` y se scoping por correo.
+
 ## Deploy
 
 Estático + cliente. **Vercel** con **Root Directory = `apps/pipeline`** y las dos
