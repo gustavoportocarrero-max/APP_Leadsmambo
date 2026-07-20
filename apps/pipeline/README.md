@@ -260,10 +260,13 @@ modo demo sin Supabase). Hay botón **Cerrar sesión** en el chip de arriba a la
 ### Configurable
 - **Dominio permitido:** env var `ALLOWED_EMAIL_DOMAIN` en Vercel (o la constante
   `ALLOWED_DOMAIN` en `data.js`). Por defecto `mambo.pe`.
-- **Mapeo correo → partner:** constante `EMAIL_TO_PARTNER` en `data.js`. Reemplaza los
-  correos de ejemplo por los reales de cada partner (la clave en minúsculas; el valor
-  debe coincidir EXACTO con el nombre del propietario). Un correo `@mambo.pe` que entre
-  pero no esté mapeado queda en **solo lectura**.
+- **Mapeo correo → partner:** constante `EMAIL_TO_PARTNER` en `data.js` (clave en
+  minúsculas; el valor debe coincidir EXACTO con el nombre del propietario). Un correo
+  `@mambo.pe` que entre pero no esté mapeado (y no sea admin) queda en **solo lectura**.
+- **Administradores:** constante `ADMIN_EMAILS` en `data.js` (fácil de editar). Un admin
+  ve todo y **edita cualquier negocio** de cualquier partner (sin la regla "solo lo mío").
+  No es propietario, así que su "EN JUEGO" suma las 4 etapas de **todos** los partners
+  (igual que cuando no hay partner seleccionado). El chip muestra "★ Admin".
 
 ### Qué configuras tú (paso a paso)
 **A) Google Cloud Console** (crear credenciales OAuth):

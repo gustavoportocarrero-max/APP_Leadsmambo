@@ -25,6 +25,7 @@
   let mode = "demo";        // "supabase" | "demo"
   let authRequired = false; // true cuando hay Supabase (login obligatorio)
   let currentEmail = "";    // correo de la sesión Google (identidad real)
+  let isAdminUser = false;  // administrador: puede editar cualquier negocio
   let dataLoaded = false;   // datos ya cargados tras autenticar
   let authError = "";       // mensaje a mostrar en el login (p.ej. dominio no permitido)
   // En modo demo (sin Supabase) se conserva el selector manual "¿Quién eres?".
@@ -161,6 +162,7 @@
      Permisos de edición (por propietario)
      ============================================================ */
   function isEditable(d) {
+    if (isAdminUser) return true; // admin edita cualquier negocio
     return !!currentUser && d.owner === currentUser;
   }
 
@@ -270,8 +272,10 @@
     toast("Editas como: " + name);
   }
   function updateIdentityChip() {
-    els.identityAvatar.textContent = initials(currentUser || currentEmail);
-    els.identityName.textContent = currentUser || (authRequired ? (currentEmail || "Cuenta") : "¿Quién eres?");
+    els.identityAvatar.textContent = isAdminUser ? "★" : initials(currentUser || currentEmail);
+    els.identityName.textContent = isAdminUser
+      ? "Admin"
+      : (currentUser || (authRequired ? (currentEmail || "Cuenta") : "¿Quién eres?"));
   }
 
   /* ============================================================
@@ -286,7 +290,9 @@
 
   function showAccount() {
     els.accEmail.textContent = currentEmail || "—";
-    els.accPartner.textContent = currentUser || "(no asignado — solo lectura)";
+    els.accPartner.textContent = isAdminUser
+      ? "Administrador (edita todo)"
+      : (currentUser || "(no asignado — solo lectura)");
     els.accountOverlay.classList.add("open");
     els.accountOverlay.setAttribute("aria-hidden", "false");
   }
@@ -298,7 +304,7 @@
   // Reacciona a la sesión: gate por dominio + identidad por correo.
   async function handleAuth(user) {
     if (!user) {
-      currentUser = ""; currentEmail = ""; updateIdentityChip();
+      currentUser = ""; currentEmail = ""; isAdminUser = false; updateIdentityChip();
       showLogin(authError); authError = "";
       return;
     }
@@ -312,7 +318,8 @@
     // Autorizado
     hideLogin();
     currentEmail = email;
-    currentUser = partnerForEmail(email); // "" si no está mapeado → solo lectura
+    isAdminUser = (typeof isAdmin === "function") && isAdmin(email);
+    currentUser = partnerForEmail(email); // "" si es admin o no está mapeado
     updateIdentityChip();
     if (!dataLoaded) {
       try {
@@ -514,7 +521,9 @@
       els.readonlyNotice.hidden = false;
       els.readonlyNotice.textContent = currentUser
         ? `Solo lectura — este negocio es de ${owner}. Solo editas los tuyos.`
-        : "Solo lectura — elige quién eres para editar tus negocios.";
+        : (authRequired
+            ? "Solo lectura — tu correo no está asignado a un partner."
+            : "Solo lectura — elige quién eres para editar tus negocios.");
     } else {
       els.readonlyNotice.hidden = true;
     }

@@ -61,16 +61,23 @@ const OWNERS = [
 //  que llega por /api/config; esta constante es el valor por defecto.)
 const ALLOWED_DOMAIN = "mambo.pe";
 
-// Mapeo CORREO → PARTNER. Reemplaza cada correo por el real de cada partner.
-// La clave (correo) debe ir en minúsculas. El valor debe coincidir EXACTO con el
-// nombre del propietario que usa la lógica de edición y el filtro (los de OWNERS).
+// Mapeo CORREO → PARTNER. La clave (correo) va en minúsculas. El valor debe
+// coincidir EXACTO con el nombre del propietario que usa la lógica de edición y el
+// filtro (los de OWNERS).
 const EMAIL_TO_PARTNER = {
-  "nicolas@mambo.pe": "Nicolás Aramburú",
-  "renzo@mambo.pe": "Renzo Duarte",
-  "cristina@mambo.pe": "Cristina Mc",
-  "guillermo@mambo.pe": "Guillermo Solano",
-  "mauricio@mambo.pe": "Mauricio",
+  "na@mambo.pe": "Nicolás Aramburú",
+  "rd@mambo.pe": "Renzo Duarte",
+  "mau@mambo.pe": "Mauricio",
+  "guillermo.solano@mambo.pe": "Guillermo Solano",
+  "cristina.mclauchlan@mambo.pe": "Cristina Mc",
 };
+
+// ADMINISTRADORES del proyecto (correos en minúsculas). No son partners: ven todo y
+// pueden EDITAR cualquier negocio (sin la restricción de "solo lo mío"). Editable aquí
+// para agregar/quitar admins en el futuro.
+const ADMIN_EMAILS = [
+  "gustavo.portocarrero@mambo.pe",
+];
 
 // ¿El correo pertenece al dominio permitido?
 function emailDomainAllowed(email, domain) {
@@ -81,10 +88,15 @@ function emailDomainAllowed(email, domain) {
 function partnerForEmail(email) {
   return EMAIL_TO_PARTNER[String(email || "").toLowerCase().trim()] || "";
 }
+// ¿El correo es administrador?
+function isAdmin(email) {
+  return ADMIN_EMAILS.map((e) => e.toLowerCase()).includes(String(email || "").toLowerCase().trim());
+}
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     SEED_DEALS, STAGES, LOSS_REASONS, SEED_VERSION, OWNERS,
-    ALLOWED_DOMAIN, EMAIL_TO_PARTNER, emailDomainAllowed, partnerForEmail,
+    ALLOWED_DOMAIN, EMAIL_TO_PARTNER, ADMIN_EMAILS,
+    emailDomainAllowed, partnerForEmail, isAdmin,
   };
 }
