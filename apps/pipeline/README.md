@@ -304,6 +304,40 @@ Redeploy.
 > quedan abiertas a anon+authenticated; si luego quieres endurecer, se restringe a
 > `authenticated` y se scoping por correo.
 
+## Reporte de actividad a Slack (martes y jueves)
+
+Mide **adopción**: quién usó la app y quién no. `api/weekly-report.js` (protegido con
+`CRON_SECRET`) lee la tabla `activity_log` (cambios hechos EN LA APP) de los últimos
+`days` días (default 4), arma un mensaje y lo publica en Slack.
+
+- **Actividad de la app** (confiable): cada guardado desde la app registra una fila en
+  `activity_log` (partner, negocio, campo, valor nuevo, fecha). Es la fuente principal.
+- **Cambios en Pipedrive** (bloque REFERENCIAL, poco confiable): cuenta negocios del
+  pipeline 1 con `update_time` reciente por propietario. **No** distingue quién hizo el
+  cambio ni si fue por la app, el cron o edición manual → va marcado como indicativo.
+
+### Qué configuras tú
+1. **Supabase → SQL Editor:** corre `db/migration-005-activity-log.sql` (crea la tabla).
+2. **Slack (Incoming Webhook):** en api.slack.com/apps → tu app → *Incoming Webhooks* →
+   activa y *Add New Webhook to Workspace* → elige el **canal** destino → copia la URL
+   `https://hooks.slack.com/services/...`. (Es un webhook nuevo, aparte del de Pipedrive.)
+3. **Vercel → Environment Variables:** crea `SLACK_WEBHOOK_URL` con esa URL. (Reutiliza
+   `CRON_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PIPEDRIVE_API_TOKEN` ya
+   existentes.) Redeploy.
+4. **Probar manual:** abre `https://TU-APP.vercel.app/api/weekly-report?key=<CRON_SECRET>`
+   → publica en Slack y devuelve un resumen JSON.
+5. **cron-job.org (2 jobs, hora Perú):** crea dos jobs con URL
+   `https://TU-APP.vercel.app/api/weekly-report?key=<CRON_SECRET>`, zona horaria
+   **(GMT-05:00) Lima**, hora **19:00**, uno los **martes** y otro los **jueves**.
+   (Equivalente en UTC: `0 0 * * 3` y `0 0 * * 5` = miércoles y viernes 00:00 UTC.)
+
+### Confiabilidad (honesto)
+- **Cambios en la app = confiables:** los registramos nosotros con el partner real del
+  login, así que "quién usó la app" es exacto.
+- **Cambios en Pipedrive directo = referenciales:** solo indican que un negocio se tocó
+  recientemente; no atribuyen el cambio a una persona ni separan app/cron/manual. Úsalo
+  como pista, no como métrica de adopción.
+
 ## Deploy
 
 Estático + cliente. **Vercel** con **Root Directory = `apps/pipeline`** y las dos

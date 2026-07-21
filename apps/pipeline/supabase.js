@@ -132,6 +132,14 @@ window.SupaDeals = (function () {
     if (error) throw error;
   }
 
+  // Registra actividad (una fila por campo cambiado). Best-effort: si falla, no
+  // debe romper el guardado (lo maneja quien llama con try/catch).
+  async function logActivity(rows) {
+    if (!client || !rows || !rows.length) return;
+    const { error } = await client.from("activity_log").insert(rows);
+    if (error) throw error;
+  }
+
   // onChange(eventType, deal|null, oldId|null)
   function subscribe(onChange) {
     if (!client) return null;
@@ -155,6 +163,7 @@ window.SupaDeals = (function () {
     fetchAll,
     updateDeal,
     deleteDeal,
+    logActivity,
     subscribe,
     rowToDeal,
     editablePatch,

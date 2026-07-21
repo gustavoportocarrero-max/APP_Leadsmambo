@@ -599,6 +599,31 @@
     return c;
   }
 
+  // Construye filas de actividad (una por campo cambiado) para activity_log.
+  function buildActivityRows(orig, d, changes, noteText) {
+    const base = {
+      actor: currentUser || currentEmail || "",
+      actor_email: currentEmail || "",
+      pipedrive_id: orig.pipedriveId || null,
+      org: orig.org || "",
+      title: orig.title || "",
+    };
+    const rows = [];
+    if ("stage" in changes) rows.push({ ...base, field: "Etapa", new_value: (stageById[d.stage] ? stageById[d.stage].label : d.stage) });
+    if ("amount" in changes) rows.push({ ...base, field: "Monto", new_value: fmtMoney(d.amount) });
+    if ("prob" in changes) rows.push({ ...base, field: "Probabilidad", new_value: probText(d.prob) });
+    if ("status" in changes) rows.push({ ...base, field: "Resultado", new_value: d.status === "ganado" ? "Ganado" : (d.status === "perdido" ? ("Perdido (" + (d.lossReason || "") + ")") : "En curso") });
+    if ("closeDate" in changes) rows.push({ ...base, field: "Fecha de cierre", new_value: fmtMonthYear(d.closeDate) || "(sin fecha)" });
+    if (noteText) rows.push({ ...base, field: "Comentario", new_value: noteText.slice(0, 140) });
+    return rows;
+  }
+  // Registra la actividad del guardado (solo con Supabase; best-effort).
+  async function recordActivity(orig, d, changes, noteText) {
+    if (mode !== "supabase") return;
+    try { await SupaDeals.logActivity(buildActivityRows(orig, d, changes, noteText)); }
+    catch (e) { console.warn("No se pudo registrar actividad:", e); }
+  }
+
   // Escritura server-side a Pipedrive (el token vive en el servidor).
   // `note` (opcional) = texto del comentario nuevo → se crea como nota del negocio.
   async function pushToPipedrive(pipedriveId, changes, note) {
@@ -719,6 +744,7 @@
 
     // 2a) Cerrado Y confirmado → sale de la vista activa (se quita de la app).
     if (res.confirmed && closing) {
+      await recordActivity(orig, draft, changes, noteText); // registrar antes de quitarlo
       try {
         await removeDealFromApp(id);
       } catch (e) {
@@ -750,7 +776,8 @@
       return;
     }
 
-    // 3) Pendiente sí/no.
+    // 3) Registrar actividad (adopción de la app) y marcar pendiente sí/no.
+    await recordActivity(orig, draft, changes, noteText);
     if (res.confirmed) { clearPendingFor(id); }
     else { markPending(id, res.remaining); }
 
