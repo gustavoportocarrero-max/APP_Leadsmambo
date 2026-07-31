@@ -12,6 +12,9 @@
   const STORAGE_PENDING = "mambo.pipeline.pending";
   const STORAGE_PENDING_META = "mambo.pipeline.pendingmeta"; // qué quedó sin confirmar por negocio
   const STORAGE_DEMO = "mambo.pipeline.demo"; // overrides locales cuando no hay Supabase
+  const STORAGE_DEMO_NEW = "mambo.pipeline.democreated"; // negocios creados en modo demo
+  const STORAGE_META = "mambo.pipeline.meta"; // caché de catálogos de Pipedrive (opciones + orgs)
+  const META_TTL_MS = 15 * 60 * 1000; // 15 min: caché fresca sin ser lenta
   const stageById = Object.fromEntries(STAGES.map((s) => [s.id, s]));
   // Etapas que cuentan para "EN JUEGO" (excluye Target y Nurturing a propósito).
   const IN_PLAY_STAGES = new Set(["contacto", "primera", "propuesta", "cierre"]);
@@ -90,7 +93,50 @@
     cancelBtn: $("cancelBtn"),
     backBtn: $("backBtn"),
     toast: $("toast"),
+    // crear negocio
+    fabWrap: $("fabWrap"),
+    addDealBtn: $("addDealBtn"),
+    createPanel: $("createPanel"),
+    createBody: $("createBody"),
+    createError: $("createError"),
+    createSimNotice: $("createSimNotice"),
+    cTitle: $("cTitle"),
+    cOwnerField: $("cOwnerField"),
+    cOwner: $("cOwner"),
+    cOrgExisting: $("cOrgExisting"),
+    cOrgSearch: $("cOrgSearch"),
+    cOrgList: $("cOrgList"),
+    cOrgNewWrap: $("cOrgNewWrap"),
+    cOrgNewName: $("cOrgNewName"),
+    cOrgSelected: $("cOrgSelected"),
+    cOrgNewBtn: $("cOrgNewBtn"),
+    cOrgExistingBtn: $("cOrgExistingBtn"),
+    cStageGrid: $("cStageGrid"),
+    cAmount: $("cAmount"),
+    cProb: $("cProb"),
+    cProbVal: $("cProbVal"),
+    cCloseMonth: $("cCloseMonth"),
+    cCloseYear: $("cCloseYear"),
+    cVertical: $("cVertical"),
+    cCountry: $("cCountry"),
+    cSource: $("cSource"),
+    cClientType: $("cClientType"),
+    cSaleType: $("cSaleType"),
+    cIndustry: $("cIndustry"),
+    cIndustryHint: $("cIndustryHint"),
+    cContactName: $("cContactName"),
+    cContactPhone: $("cContactPhone"),
+    cContactEmail: $("cContactEmail"),
+    createBackBtn: $("createBackBtn"),
+    createCancelBtn: $("createCancelBtn"),
+    createSubmitBtn: $("createSubmitBtn"),
   };
+
+  /* ---------- estado de creación ---------- */
+  let metaCache = null;                 // { fields, organizations, partners, fieldsFound }
+  let createDraft = null;               // { stage, prob, closeDate }
+  let createOrg = { mode: "existing", org: null }; // org elegida: {id?, name}
+  let creating = false;                 // envío en curso (evita doble click)
 
   /* ============================================================
      Persistencia local (solo identidad + lista de exportación)
@@ -125,10 +171,19 @@
   }
   function seedDemoDeals() {
     const ov = loadDemoOverrides();
-    return SEED_DEALS.map((d) => {
+    const base = SEED_DEALS.map((d) => {
       const n = normalize(d);
       return ov[n.id] ? { ...n, ...ov[n.id] } : n;
     });
+    // negocios creados en modo demo (persisten localmente)
+    return base.concat(loadDemoCreated().map(normalize));
+  }
+  function loadDemoCreated() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_DEMO_NEW) || "[]"); }
+    catch (_) { return []; }
+  }
+  function saveDemoCreated(arr) {
+    localStorage.setItem(STORAGE_DEMO_NEW, JSON.stringify(arr));
   }
 
   function normalize(d) {
@@ -276,6 +331,21 @@
     els.identityName.textContent = isAdminUser
       ? "Admin"
       : (currentUser || (authRequired ? (currentEmail || "Cuenta") : "¿Quién eres?"));
+    updateFabVisibility();
+  }
+
+  /* ============================================================
+     Crear negocio — visibilidad del botón (+)
+     ============================================================ */
+  // Puede crear: admin (elige propietario) o partner con identidad. Un correo de
+  // Mambo sin partner asignado es solo lectura → no crea. En demo, tras elegir quién.
+  function canCreate() {
+    if (isAdminUser) return true;
+    return !!currentUser;
+  }
+  function updateFabVisibility() {
+    if (!els.fabWrap) return;
+    els.fabWrap.hidden = !canCreate();
   }
 
   /* ============================================================
@@ -823,6 +893,328 @@
   }
 
   /* ============================================================
+     Crear negocio — catálogos (meta), formulario y envío
+     ============================================================ */
+  function loadMetaCache() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORAGE_META) || "null");
+      if (raw && raw.t && (Date.now() - raw.t) < META_TTL_MS && raw.data) return raw.data;
+    } catch (_) {}
+    return null;
+  }
+  function saveMetaCache(data) {
+    try { localStorage.setItem(STORAGE_META, JSON.stringify({ t: Date.now(), data })); } catch (_) {}
+  }
+
+  // Catálogos desde Pipedrive (opciones de campos + organizaciones + partners).
+  async function fetchMeta() {
+    const token = await SupaDeals.getAccessToken();
+    if (!token) throw new Error("Sesión no disponible. Vuelve a iniciar sesión.");
+    const r = await fetch("/api/pipedrive-meta", { headers: { Authorization: "Bearer " + token }, cache: "no-store" });
+    let j = {};
+    try { j = await r.json(); } catch (_) {}
+    if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return {
+      fields: j.fields || {}, fieldsFound: j.fieldsFound || {},
+      organizations: j.organizations || [], partners: j.partners || [],
+    };
+  }
+
+  // Meta de respaldo (modo demo, o si Pipedrive no responde): opciones a partir de
+  // los datos ya cargados. En Supabase NO se usan orgs de aquí (no tienen id).
+  function buildDemoMeta() {
+    const uniq = (key) => [...new Set(deals.map((d) => d[key]).filter(Boolean))].sort()
+      .map((v) => ({ id: v, label: v }));
+    const orgs = [...new Set(deals.map((d) => d.org).filter(Boolean))].sort()
+      .map((name) => ({ id: null, name }));
+    return {
+      fields: {
+        vertical: uniq("vertical"), client_type: uniq("clientType"),
+        sale_type: uniq("saleType"), source: uniq("source"),
+        country: COUNTRIES.map((c) => ({ id: c, label: c })), industry: uniq("industry"),
+      },
+      fieldsFound: {}, organizations: orgs,
+      partners: (typeof PARTNERS !== "undefined" ? PARTNERS : []).map((name) => ({ name, userId: null })),
+    };
+  }
+
+  // Rellena un <select> con opciones (strings o {label}); conserva la selección previa.
+  function fillSelect(el, options, emptyLabel) {
+    const prev = el.value;
+    const opts = (options || []).map((o) => {
+      const label = typeof o === "string" ? o : o.label;
+      return `<option value="${escapeAttr(label)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    el.innerHTML = `<option value="">${escapeHtml(emptyLabel || "— Seleccionar —")}</option>` + opts;
+    if (prev && [...el.options].some((o) => o.value === prev)) el.value = prev;
+  }
+
+  function applyMeta(meta) {
+    metaCache = meta;
+    createOrg.orgs = meta.organizations || [];
+    fillSelect(els.cVertical, meta.fields.vertical, "— Vertical —");
+    fillSelect(els.cSource, meta.fields.source, "— Fuente de lead —");
+    fillSelect(els.cClientType, meta.fields.client_type, "— Tipo de cliente —");
+    fillSelect(els.cSaleType, meta.fields.sale_type, "— Tipo de venta —");
+    fillSelect(els.cIndustry, meta.fields.industry, "— Industria —");
+    // País siempre fijo (Perú/Ecuador); no se toma de meta para el selector.
+    if (createOrg.mode === "existing" && !createOrg.org && !els.cOrgList.hidden) renderOrgList(els.cOrgSearch.value);
+  }
+
+  function populateCreateCloseSelects() {
+    els.cCloseMonth.innerHTML = '<option value="">— Mes —</option>' +
+      MONTHS_ES.map((n, i) => `<option value="${i + 1}">${n}</option>`).join("");
+    els.cCloseYear.innerHTML = '<option value="">— Año —</option>' +
+      CLOSE_YEARS.map((y) => `<option value="${y}">${y}</option>`).join("");
+  }
+  function updateCreateClose() {
+    const m = els.cCloseMonth.value, y = els.cCloseYear.value;
+    createDraft.closeDate = (m && y)
+      ? `${y}-${pad2(Number(m))}-${pad2(lastDayOfMonth(Number(y), Number(m)))}` : "";
+  }
+  function renderCreateStageGrid() {
+    els.cStageGrid.innerHTML = STAGES.map((s) =>
+      `<button class="stage-opt" data-stage="${s.id}" style="background:${s.bg};color:${s.text}"
+        aria-pressed="${createDraft.stage === s.id ? "true" : "false"}">${escapeHtml(s.label)}</button>`
+    ).join("");
+  }
+
+  /* ---- combobox de organización ---- */
+  function renderOrgList(query) {
+    const orgs = createOrg.orgs || [];
+    const q = (query || "").trim().toLowerCase();
+    const matches = (q ? orgs.filter((o) => o.name.toLowerCase().includes(q)) : orgs).slice(0, 60);
+    if (!orgs.length) {
+      els.cOrgList.innerHTML = `<div class="combo-empty">${mode === "supabase" ? "Cargando organizaciones…" : "Sin organizaciones — usa “Crear nueva”."}</div>`;
+    } else if (!matches.length) {
+      els.cOrgList.innerHTML = `<div class="combo-empty">Sin resultados. Usa “Crear organización nueva”.</div>`;
+    } else {
+      els.cOrgList.innerHTML = matches.map((o) =>
+        `<button type="button" class="combo-item" data-id="${o.id == null ? "" : o.id}" data-name="${escapeAttr(o.name)}">${escapeHtml(o.name)}</button>`
+      ).join("");
+    }
+    els.cOrgList.hidden = false;
+  }
+  function selectExistingOrg(org) {
+    createOrg.org = org;
+    els.cOrgSearch.value = org.name;
+    els.cOrgList.hidden = true;
+    els.cOrgSelected.hidden = false;
+    els.cOrgSelected.innerHTML =
+      `<span class="co-badge">✓</span><span>${escapeHtml(org.name)}</span><button type="button" class="co-clear" id="cOrgClear">cambiar</button>`;
+  }
+  function switchOrgNew() {
+    createOrg.mode = "new"; createOrg.org = null;
+    els.cOrgExisting.hidden = true;
+    els.cOrgSelected.hidden = true;
+    els.cOrgList.hidden = true;
+    els.cOrgNewWrap.hidden = false;
+    els.cOrgNewBtn.hidden = true;
+    els.cOrgExistingBtn.hidden = false;
+    els.cOrgNewName.focus();
+  }
+  function switchOrgExisting() {
+    createOrg.mode = "existing"; createOrg.org = null;
+    els.cOrgNewWrap.hidden = true; els.cOrgNewName.value = "";
+    els.cOrgExisting.hidden = false;
+    els.cOrgSelected.hidden = true;
+    els.cOrgNewBtn.hidden = false;
+    els.cOrgExistingBtn.hidden = true;
+    els.cOrgSearch.value = ""; els.cOrgList.hidden = true;
+  }
+  function resolveOrgForSubmit() {
+    if (createOrg.mode === "new") {
+      const name = els.cOrgNewName.value.trim();
+      return name ? { name } : null;
+    }
+    if (createOrg.org) return createOrg.org.id != null ? { id: createOrg.org.id } : { name: createOrg.org.name };
+    return null;
+  }
+
+  /* ---- estado del formulario / avisos ---- */
+  function showCreateError(msg) {
+    els.createError.hidden = false; els.createError.textContent = msg;
+    els.createBody.scrollTop = 0;
+  }
+  function showCreateNotice(msg) {
+    if (msg) { els.createSimNotice.hidden = false; els.createSimNotice.textContent = msg; }
+    else els.createSimNotice.hidden = true;
+  }
+  function setCreateBusy(b) {
+    creating = b;
+    els.createSubmitBtn.disabled = b;
+    els.createSubmitBtn.classList.toggle("is-busy", b);
+    els.createSubmitBtn.textContent = b ? "Creando…" : "Crear negocio";
+  }
+
+  function resetCreateForm() {
+    setCreateBusy(false);
+    els.createError.hidden = true;
+    showCreateNotice("");
+    els.cTitle.value = "";
+    createDraft = { stage: "target", prob: null, closeDate: "" };
+    renderCreateStageGrid();
+    els.cAmount.value = 0;
+    els.cProb.value = 0;
+    els.cProbVal.textContent = "Sin definir"; els.cProbVal.classList.add("null");
+    populateCreateCloseSelects();
+    els.cCloseMonth.value = ""; els.cCloseYear.value = "";
+    fillSelect(els.cCountry, COUNTRIES, "— País —");
+    // placeholders hasta que llegue meta
+    fillSelect(els.cVertical, [], "— Vertical —");
+    fillSelect(els.cSource, [], "— Fuente de lead —");
+    fillSelect(els.cClientType, [], "— Tipo de cliente —");
+    fillSelect(els.cSaleType, [], "— Tipo de venta —");
+    fillSelect(els.cIndustry, [], "— Industria —");
+    els.cIndustryHint.hidden = false;
+    els.cContactName.value = ""; els.cContactPhone.value = ""; els.cContactEmail.value = "";
+    // propietario: admin elige; partner queda implícito (su identidad)
+    if (isAdminUser) {
+      els.cOwnerField.hidden = false;
+      const partners = (typeof PARTNERS !== "undefined" ? PARTNERS : []);
+      els.cOwner.innerHTML = partners.map((p) => `<option value="${escapeAttr(p)}">${escapeHtml(p)}</option>`).join("");
+    } else {
+      els.cOwnerField.hidden = true;
+    }
+    switchOrgExisting();
+  }
+
+  function openCreate() {
+    if (!canCreate()) return;
+    resetCreateForm();
+    els.createPanel.classList.add("open");
+    els.createPanel.setAttribute("aria-hidden", "false");
+    els.createBody.scrollTop = 0;
+
+    const cached = loadMetaCache();
+    if (cached) applyMeta(cached);
+    (async () => {
+      try {
+        const meta = (mode === "supabase") ? await fetchMeta() : buildDemoMeta();
+        saveMetaCache(meta);
+        applyMeta(meta);
+      } catch (e) {
+        console.warn("No se pudieron cargar catálogos:", e);
+        if (!cached) {
+          const fb = buildDemoMeta();
+          if (mode === "supabase") fb.organizations = []; // orgs sin id no sirven para vincular
+          applyMeta(fb);
+          if (mode === "supabase") showCreateNotice("No pude cargar la lista de organizaciones de Pipedrive. Puedes crear una nueva; reintenta más tarde para elegir existentes.");
+        }
+      }
+    })();
+  }
+  function closeCreate() {
+    els.createPanel.classList.remove("open");
+    els.createPanel.setAttribute("aria-hidden", "true");
+    creating = false;
+  }
+
+  // Registra la creación en activity_log (adopción). Best-effort.
+  async function recordCreation(deal) {
+    if (mode !== "supabase") return;
+    const rows = [{
+      actor: currentUser || currentEmail || "",
+      actor_email: currentEmail || "",
+      pipedrive_id: deal.pipedriveId || null,
+      org: deal.org || "", title: deal.title || "",
+      field: "Creación",
+      new_value: "Negocio creado" + (deal.amount ? " · " + fmtMoney(deal.amount) : ""),
+    }];
+    try { await SupaDeals.logActivity(rows); } catch (e) { console.warn("No se pudo registrar la creación:", e); }
+  }
+
+  async function submitCreate() {
+    if (creating) return;
+    els.createError.hidden = true;
+    const title = els.cTitle.value.trim();
+    if (!title) return showCreateError("El título es obligatorio.");
+    const org = resolveOrgForSubmit();
+    if (!org) return showCreateError("Elige una organización existente o escribe el nombre de una nueva.");
+    const owner = isAdminUser ? (els.cOwner.value || "") : currentUser;
+    if (!owner) return showCreateError("No hay propietario asignado.");
+
+    const fields = {
+      vertical: els.cVertical.value, client_type: els.cClientType.value,
+      sale_type: els.cSaleType.value, source: els.cSource.value,
+      country: els.cCountry.value, industry: els.cIndustry.value,
+    };
+    const cName = els.cContactName.value.trim();
+    const contact = cName
+      ? { name: cName, phone: els.cContactPhone.value.trim(), email: els.cContactEmail.value.trim() }
+      : null;
+    const amount = Number(els.cAmount.value) || 0;
+    const payload = {
+      title, owner, stage: createDraft.stage, amount, prob: createDraft.prob,
+      closeDate: createDraft.closeDate || "", org, contact, fields,
+    };
+
+    setCreateBusy(true);
+
+    if (mode === "supabase") {
+      try {
+        const token = await SupaDeals.getAccessToken();
+        const r = await fetch("/api/pipedrive-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify(payload),
+        });
+        let j = {};
+        try { j = await r.json(); } catch (_) {}
+        if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+
+        if (j.simulated) {
+          setCreateBusy(false);
+          showCreateNotice("Simulado: NO se creó en Pipedrive. Activa PIPEDRIVE_CREATE_ENABLED=true para crear de verdad.");
+          return;
+        }
+
+        let row;
+        try { row = await SupaDeals.createDeal(j.deal); }
+        catch (e) {
+          console.error("Insert Supabase falló tras crear en Pipedrive:", e);
+          setCreateBusy(false);
+          return showCreateError("Se creó en Pipedrive, pero no se pudo guardar en la app (" + (e.message || e) + "). El próximo sync lo traerá.");
+        }
+        applyDeal(row);
+        lastWrite = { id: row.id, t: Date.now() };
+        await recordCreation(row);
+
+        // añade la nueva org al catálogo cacheado (para próximas creaciones sin recargar)
+        if (org.name && metaCache) {
+          metaCache.organizations = [{ id: j.orgId, name: row.org }].concat(metaCache.organizations || []);
+          saveMetaCache(metaCache);
+        }
+
+        if (j.warnings && j.warnings.length) console.warn("[crear] avisos:", j.warnings);
+        closeCreate();
+        renderOwnerFilter();
+        renderAll();
+        toast("Negocio creado en Pipedrive ✓" + (j.warnings && j.warnings.length ? " (con avisos)" : ""));
+      } catch (e) {
+        setCreateBusy(false);
+        showCreateError(e.message || "No se pudo crear el negocio.");
+      }
+    } else {
+      // modo demo: negocio local (persiste en localStorage)
+      const deal = normalize({
+        id: -Date.now(), pipedriveId: null,
+        org: org.name || "", title, owner,
+        stage: createDraft.stage, amount, prob: createDraft.prob,
+        vertical: fields.vertical, clientType: fields.client_type, saleType: fields.sale_type,
+        source: fields.source, industry: fields.industry, closeDate: createDraft.closeDate || "",
+      });
+      const arr = loadDemoCreated(); arr.push(deal); saveDemoCreated(arr);
+      applyDeal(deal);
+      setCreateBusy(false);
+      closeCreate();
+      renderOwnerFilter();
+      renderAll();
+      toast("Negocio creado (demo local) ✓");
+    }
+  }
+
+  /* ============================================================
      Realtime — cambios de otros partners
      ============================================================ */
   function onRealtime(type, deal, oldId) {
@@ -970,9 +1362,58 @@
     els.cancelBtn.addEventListener("click", closeDetail);
     els.backBtn.addEventListener("click", closeDetail);
 
+    /* ---- crear negocio ---- */
+    els.addDealBtn.addEventListener("click", openCreate);
+    els.createBackBtn.addEventListener("click", closeCreate);
+    els.createCancelBtn.addEventListener("click", closeCreate);
+    els.createSubmitBtn.addEventListener("click", submitCreate);
+    els.cProb.addEventListener("input", (e) => {
+      createDraft.prob = Number(e.target.value);
+      els.cProbVal.textContent = createDraft.prob + "%";
+      els.cProbVal.classList.remove("null");
+    });
+    els.cStageGrid.addEventListener("click", (e) => {
+      const opt = e.target.closest(".stage-opt");
+      if (!opt) return;
+      createDraft.stage = opt.dataset.stage;
+      els.cStageGrid.querySelectorAll(".stage-opt").forEach((b) =>
+        b.setAttribute("aria-pressed", b.dataset.stage === createDraft.stage ? "true" : "false"));
+    });
+    els.cCloseMonth.addEventListener("change", updateCreateClose);
+    els.cCloseYear.addEventListener("change", updateCreateClose);
+    // combobox organización
+    els.cOrgSearch.addEventListener("input", (e) => {
+      createOrg.org = null; els.cOrgSelected.hidden = true;
+      renderOrgList(e.target.value);
+    });
+    els.cOrgSearch.addEventListener("focus", () => {
+      if (createOrg.mode === "existing") renderOrgList(els.cOrgSearch.value);
+    });
+    els.cOrgList.addEventListener("click", (e) => {
+      const it = e.target.closest(".combo-item");
+      if (!it) return;
+      selectExistingOrg({ id: it.dataset.id ? Number(it.dataset.id) : null, name: it.dataset.name });
+    });
+    els.cOrgSelected.addEventListener("click", (e) => {
+      if (!e.target.closest("#cOrgClear")) return;
+      createOrg.org = null; els.cOrgSearch.value = ""; els.cOrgSelected.hidden = true;
+      renderOrgList(""); els.cOrgSearch.focus();
+    });
+    els.cOrgNewBtn.addEventListener("click", switchOrgNew);
+    els.cOrgExistingBtn.addEventListener("click", switchOrgExisting);
+    // cerrar la lista al hacer click fuera del combobox
+    document.addEventListener("click", (e) => {
+      if (els.createPanel.classList.contains("open") &&
+          createOrg.mode === "existing" &&
+          !els.cOrgExisting.contains(e.target)) {
+        els.cOrgList.hidden = true;
+      }
+    });
+
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
       if (els.identityOverlay.classList.contains("open")) { if (currentUser) hideIdentity(); }
+      else if (els.createPanel.classList.contains("open")) closeCreate();
       else if (els.detail.classList.contains("open")) closeDetail();
     });
   }

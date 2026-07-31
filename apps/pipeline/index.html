@@ -70,6 +70,13 @@
     <section class="list" id="dealList"></section>
   </main>
 
+  <!-- ===== BOTÓN FLOTANTE: NUEVO NEGOCIO ===== -->
+  <div class="fab-wrap" id="fabWrap" hidden>
+    <button class="fab" id="addDealBtn" aria-label="Agregar negocio" title="Agregar negocio">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+
   <!-- ===== DETALLE / EDICIÓN (pantalla 02 + 03) ===== -->
   <aside class="detail" id="detail" aria-hidden="true">
     <header class="detail-header">
@@ -159,6 +166,118 @@
     <div class="save-bar">
       <button class="btn btn-ghost" id="cancelBtn">Cancelar</button>
       <button class="btn btn-primary" id="saveBtn">Guardar</button>
+    </div>
+  </aside>
+
+  <!-- ===== NUEVO NEGOCIO (panel de creación) ===== -->
+  <aside class="detail create-panel" id="createPanel" aria-hidden="true">
+    <header class="detail-header">
+      <button class="icon-btn" id="createBackBtn" aria-label="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="titles">
+        <div class="d-org">Nuevo negocio</div>
+        <div class="d-title">Crear en Pipedrive</div>
+      </div>
+    </header>
+
+    <div class="detail-body" id="createBody">
+      <div class="create-error" id="createError" hidden></div>
+      <div class="sync-notice" id="createSimNotice" hidden></div>
+
+      <!-- Título -->
+      <div class="field">
+        <label for="cTitle">Título *</label>
+        <input class="input" id="cTitle" type="text" placeholder="Ej. Diagnóstico de cultura — Acme" />
+      </div>
+
+      <!-- Propietario (solo admin puede elegir) -->
+      <div class="field" id="cOwnerField" hidden>
+        <label for="cOwner">Propietario</label>
+        <select class="input" id="cOwner" aria-label="Propietario del negocio"></select>
+      </div>
+
+      <!-- Organización: buscar existente o crear nueva -->
+      <div class="field">
+        <label for="cOrgSearch">Organización *</label>
+
+        <!-- modo: elegir existente -->
+        <div class="combo" id="cOrgExisting">
+          <input class="input" id="cOrgSearch" type="text" autocomplete="off" spellcheck="false" placeholder="Buscar organización…" />
+          <div class="combo-list" id="cOrgList" hidden></div>
+        </div>
+
+        <!-- modo: crear nueva -->
+        <div id="cOrgNewWrap" hidden>
+          <input class="input" id="cOrgNewName" type="text" placeholder="Nombre de la organización nueva" />
+        </div>
+
+        <!-- organización elegida -->
+        <div class="combo-selected" id="cOrgSelected" hidden></div>
+
+        <div class="combo-actions">
+          <button class="link-btn" id="cOrgNewBtn" type="button">+ Crear organización nueva</button>
+          <button class="link-btn" id="cOrgExistingBtn" type="button" hidden>← Elegir una existente</button>
+        </div>
+      </div>
+
+      <!-- Etapa -->
+      <div>
+        <div class="section-label">Etapa</div>
+        <div class="stage-grid" id="cStageGrid" role="group" aria-label="Seleccionar etapa"></div>
+      </div>
+
+      <!-- Monto -->
+      <div class="field">
+        <label for="cAmount">Monto (US$)</label>
+        <div class="amount-field">
+          <span class="prefix">$</span>
+          <input class="input mono" id="cAmount" type="number" inputmode="numeric" min="0" step="1000" value="0" />
+        </div>
+      </div>
+
+      <!-- Probabilidad -->
+      <div class="field">
+        <div class="prob-head">
+          <label for="cProb">Probabilidad</label>
+          <span class="prob-val null" id="cProbVal">Sin definir</span>
+        </div>
+        <input type="range" id="cProb" min="0" max="100" step="5" value="0" />
+      </div>
+
+      <!-- Fecha de cierre -->
+      <div class="field">
+        <label for="cCloseMonth">Fecha de cierre prevista</label>
+        <div class="date-my">
+          <select class="input" id="cCloseMonth" aria-label="Mes de cierre"></select>
+          <select class="input" id="cCloseYear" aria-label="Año de cierre"></select>
+        </div>
+      </div>
+
+      <!-- Campos de lista (opciones desde Pipedrive) -->
+      <div class="field"><label for="cVertical">Vertical</label><select class="input" id="cVertical"></select></div>
+      <div class="field"><label for="cCountry">País</label><select class="input" id="cCountry"></select></div>
+      <div class="field"><label for="cSource">Fuente de lead</label><select class="input" id="cSource"></select></div>
+      <div class="field"><label for="cClientType">Tipo de cliente</label><select class="input" id="cClientType"></select></div>
+      <div class="field"><label for="cSaleType">Tipo de venta</label><select class="input" id="cSaleType"></select></div>
+      <div class="field">
+        <label for="cIndustry">Industria</label>
+        <select class="input" id="cIndustry"></select>
+        <div class="field-hint" id="cIndustryHint" hidden>Solo se guarda al crear una organización nueva.</div>
+      </div>
+
+      <!-- Persona de contacto (opcional) -->
+      <div class="create-section">
+        <div class="section-label">Persona de contacto (opcional)</div>
+        <div class="field"><label for="cContactName">Nombre</label><input class="input" id="cContactName" type="text" placeholder="Nombre y apellido" /></div>
+        <div class="field"><label for="cContactPhone">Teléfono</label><input class="input" id="cContactPhone" type="tel" inputmode="tel" placeholder="Opcional" /></div>
+        <div class="field"><label for="cContactEmail">Correo</label><input class="input" id="cContactEmail" type="email" inputmode="email" placeholder="Opcional" /></div>
+      </div>
+    </div>
+
+    <div class="save-bar">
+      <button class="btn btn-ghost" id="createCancelBtn">Cancelar</button>
+      <button class="btn btn-primary" id="createSubmitBtn">Crear negocio</button>
     </div>
   </aside>
 

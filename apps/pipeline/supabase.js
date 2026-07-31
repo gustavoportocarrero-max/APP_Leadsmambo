@@ -126,6 +126,41 @@ window.SupaDeals = (function () {
     return rowToDeal(data);
   }
 
+  // Inserta un negocio recién creado (ya existe en Pipedrive con su pipedrive_id).
+  // Devuelve la fila insertada como modelo de la app. El próximo pull hará upsert
+  // por pipedrive_id (on_conflict merge), así que no se duplica.
+  async function createDeal(deal) {
+    const row = {
+      pipedrive_id: (deal.pipedriveId === null || deal.pipedriveId === undefined) ? null : deal.pipedriveId,
+      org: deal.org || "",
+      title: deal.title || "",
+      owner: deal.owner || "",
+      stage: deal.stage || "target",
+      amount: Number(deal.amount) || 0,
+      prob: (deal.prob === null || deal.prob === undefined || deal.prob === "") ? null : Number(deal.prob),
+      vertical: deal.vertical || "",
+      client_type: deal.clientType || "",
+      industry: deal.industry || "",
+      source: deal.source || "",
+      sale_type: deal.saleType || "",
+      close_date: deal.closeDate ? deal.closeDate : null,
+      comment: "",
+      status: "activo",
+      sync_pending: false,
+    };
+    const { data, error } = await client.from("deals").insert(row).select().single();
+    if (error) throw error;
+    return rowToDeal(data);
+  }
+
+  // access_token de la sesión actual (para autenticar las funciones /api que crean
+  // negocios). Null si no hay sesión.
+  async function getAccessToken() {
+    if (!client) return null;
+    const { data } = await client.auth.getSession();
+    return (data && data.session && data.session.access_token) ? data.session.access_token : null;
+  }
+
   // Borra el negocio (se usa al cerrarlo: ganado/perdido → sale de la vista activa).
   async function deleteDeal(id) {
     const { error } = await client.from("deals").delete().eq("id", id);
@@ -162,12 +197,14 @@ window.SupaDeals = (function () {
     init,
     fetchAll,
     updateDeal,
+    createDeal,
     deleteDeal,
     logActivity,
     subscribe,
     rowToDeal,
     editablePatch,
     getUser,
+    getAccessToken,
     signInWithGoogle,
     signOut,
     onAuth,

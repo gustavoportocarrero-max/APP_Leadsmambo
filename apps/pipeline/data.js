@@ -79,6 +79,14 @@ const ADMIN_EMAILS = [
   "gustavo.portocarrero@mambo.pe",
 ];
 
+// Lista de partners (para el selector de propietario al crear, si eres admin).
+// Deriva de EMAIL_TO_PARTNER: los nombres deben coincidir EXACTO con Pipedrive.
+const PARTNERS = [...new Set(Object.values(EMAIL_TO_PARTNER))];
+
+// País del negocio: opciones fijas del piloto (solo Perú/Ecuador). El selector
+// SIEMPRE ofrece estas dos; la escritura a Pipedrive se hace por nombre de campo.
+const COUNTRIES = ["Perú", "Ecuador"];
+
 // ¿El correo pertenece al dominio permitido?
 function emailDomainAllowed(email, domain) {
   const d = String(domain || ALLOWED_DOMAIN).toLowerCase().trim();
@@ -96,7 +104,7 @@ function isAdmin(email) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     SEED_DEALS, STAGES, LOSS_REASONS, SEED_VERSION, OWNERS,
-    ALLOWED_DOMAIN, EMAIL_TO_PARTNER, ADMIN_EMAILS,
+    ALLOWED_DOMAIN, EMAIL_TO_PARTNER, ADMIN_EMAILS, PARTNERS, COUNTRIES,
     emailDomainAllowed, partnerForEmail, isAdmin,
   };
 }
