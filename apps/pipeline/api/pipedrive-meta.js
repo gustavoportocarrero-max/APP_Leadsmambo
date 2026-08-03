@@ -18,7 +18,10 @@
 //   PIPEDRIVE_ALLOWED_OWNERS (opcional, lista de partners; default abajo),
 //   + las de _auth.js (SUPABASE_URL, SUPABASE_ANON_KEY, ALLOWED_EMAIL_DOMAIN).
 //
-// Debug (requiere sesión): GET /api/pipedrive-meta?fields=1  → solo mapeo de campos.
+// Debug: GET /api/pipedrive-meta?fields=1  → solo nombres/opciones de campos (sin
+//   datos de clientes). Acepta ?key=CRON_SECRET por URL (como pipedrive-pull/inspect)
+//   O sesión de Supabase. Cualquier otro modo (devuelve organizaciones) SIEMPRE
+//   exige sesión de Supabase; el POST de creación también, sin excepción.
 // ============================================================
 
 import { verifyUser } from "./_auth.js";
@@ -56,15 +59,34 @@ function optionsArray(field) {
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
-  const auth = await verifyUser(req);
-  if (!auth.ok) { res.status(auth.status).json({ ok: false, error: auth.error }); return; }
+  const debugFields = req.query && req.query.fields === "1";
+
+  // AUTENTICACIÓN.
+  //  - ?fields=1 (solo nombres/opciones de campos, sin datos de clientes): acepta
+  //    ?key=CRON_SECRET por URL (o Bearer CRON_SECRET), como los otros endpoints de
+  //    debug; si no, cae a sesión de Supabase.
+  //  - Cualquier otro modo (devuelve organizaciones) SIEMPRE exige sesión de Supabase.
+  let keyOk = false;
+  if (debugFields) {
+    const secret = process.env.CRON_SECRET;
+    const key = (req.query && req.query.key) || "";
+    const authHeader = req.headers.authorization || "";
+    keyOk = !!secret && (key === secret || authHeader === `Bearer ${secret}`);
+  }
+  if (!keyOk) {
+    const auth = await verifyUser(req);
+    if (!auth.ok) {
+      const hint = debugFields ? " (o usa ?key=CRON_SECRET para consultar ?fields=1)" : "";
+      res.status(auth.status).json({ ok: false, error: auth.error + hint });
+      return;
+    }
+  }
 
   const token = process.env.PIPEDRIVE_API_TOKEN;
   if (!token) { res.status(500).json({ ok: false, error: "Falta PIPEDRIVE_API_TOKEN." }); return; }
 
   const domain = process.env.PIPEDRIVE_COMPANY_DOMAIN;
   const pdBase = domain ? `https://${domain}.pipedrive.com/api/v1` : "https://api.pipedrive.com/v1";
-  const debugFields = req.query && req.query.fields === "1";
 
   const pd = async (path, params = {}) => {
     const u = new URL(pdBase + path);
