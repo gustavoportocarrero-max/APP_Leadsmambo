@@ -214,11 +214,17 @@
   }
 
   /* ============================================================
-     Permisos de edición (por propietario)
+     Permisos de edición
      ============================================================ */
+  // Cualquier partner con identidad válida del login edita CUALQUIER negocio
+  // (hay negocios compartidos entre partners; ya no hay candado "solo lo mío").
+  // El propietario del negocio NO cambia al editarlo — solo se permite tocarlo,
+  // y activity_log registra quién lo hizo (el partner logueado real).
+  // Sigue siendo solo lectura únicamente para correos @mambo.pe sin partner
+  // mapeado y sin ser admin (currentUser === "" y no admin).
   function isEditable(d) {
     if (isAdminUser) return true; // admin edita cualquier negocio
-    return !!currentUser && d.owner === currentUser;
+    return !!currentUser;         // partner con identidad → edita cualquiera
   }
 
   /* ============================================================
@@ -489,8 +495,10 @@
       : won
         ? `<span class="badge won">Ganado</span>`
         : `<span class="badge" style="background:${st.bg};color:${st.text}">${escapeHtml(st.label)}</span>`;
+    // El candado solo aparece para correos sin partner (solo lectura). Entre
+    // partners ya no hay bloqueo por propietario.
     const lock = locked
-      ? `<span class="lock" title="Solo lectura — pertenece a ${escapeAttr(d.owner)}">🔒</span>`
+      ? `<span class="lock" title="Solo lectura — tu correo no está asignado a un partner">🔒</span>`
       : "";
     const noPd = !d.pipedriveId
       ? `<span class="nopd" title="Sin ID de Pipedrive — no se sincroniza">⚠</span>`
@@ -578,7 +586,8 @@
     els.detailBody.scrollTop = 0;
   }
 
-  // Aplica el modo solo-lectura cuando el negocio no es del usuario actual.
+  // Aplica el modo solo-lectura. Ahora solo ocurre para correos @mambo.pe sin
+  // partner mapeado (ni admin): los partners editan cualquier negocio.
   function setReadonlyUI(readonly, owner) {
     els.detail.classList.toggle("is-readonly", readonly);
     els.amountInput.disabled = readonly;
@@ -589,11 +598,9 @@
     els.resultSeg.querySelectorAll(".seg").forEach((b) => { b.disabled = readonly; });
     if (readonly) {
       els.readonlyNotice.hidden = false;
-      els.readonlyNotice.textContent = currentUser
-        ? `Solo lectura — este negocio es de ${owner}. Solo editas los tuyos.`
-        : (authRequired
-            ? "Solo lectura — tu correo no está asignado a un partner."
-            : "Solo lectura — elige quién eres para editar tus negocios.");
+      els.readonlyNotice.textContent = authRequired
+        ? "Solo lectura — tu correo no está asignado a un partner."
+        : "Solo lectura — elige quién eres para editar los negocios.";
     } else {
       els.readonlyNotice.hidden = true;
     }
