@@ -49,6 +49,11 @@
     <!-- aviso de conexión (modo demo / error) -->
     <div class="conn-banner" id="connBanner" hidden></div>
 
+    <!-- ===== "TERMINÉ DE REVISAR" (solo partners) ===== -->
+    <div class="review-bar" id="reviewBar" hidden>
+      <button class="review-btn" id="reviewDoneBtn">✓ Terminé de revisar</button>
+    </div>
+
     <!-- ===== FILTROS ===== -->
     <section class="filters">
       <div class="search-wrap">
@@ -298,6 +303,27 @@
       <div class="account-row"><span class="account-k">Partner</span><span id="accPartner">—</span></div>
       <button class="btn btn-primary" id="logoutBtn" style="width:100%;margin-top:var(--s-4)">Cerrar sesión</button>
       <button class="btn btn-ghost" id="accountCloseBtn" style="width:100%;margin-top:var(--s-2)">Volver</button>
+    </div>
+  </div>
+
+  <!-- ===== REVISIÓN SEMANAL: ¿Editaste lo que corresponde? ===== -->
+  <div class="id-overlay" id="reviewOverlay" aria-hidden="true">
+    <div class="id-card">
+      <div class="id-title">¿Editaste lo que corresponde?</div>
+      <div class="id-sub">Confirma si ya revisaste y actualizaste tus negocios esta semana.</div>
+      <div class="review-actions">
+        <button class="btn btn-primary" id="reviewYesBtn">Sí</button>
+        <button class="btn btn-ghost" id="reviewNoBtn">No</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Advertencia del 2º "No" -->
+  <div class="id-overlay" id="reviewWarnOverlay" aria-hidden="true">
+    <div class="id-card">
+      <div class="id-title">⚠️ Ojo</div>
+      <div class="id-sub" style="font-size:15px;line-height:1.5">Recuerda que el reporte estará desactualizado si es que no editas.</div>
+      <button class="btn btn-primary" id="reviewWarnOkBtn" style="width:100%;margin-top:var(--s-4)">Entendido</button>
     </div>
   </div>
 

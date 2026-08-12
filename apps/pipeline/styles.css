@@ -783,6 +783,24 @@ input[type="range"]::-moz-range-thumb {
 /* estado "creando…" del botón primario */
 .btn-primary.is-busy { opacity: 0.8; cursor: progress; }
 
+/* ============================================================
+   "Terminé de revisar" — barra + modal Sí/No
+   ============================================================ */
+.review-bar { padding: var(--s-3) var(--s-4) 0; }
+.review-bar[hidden] { display: none; }
+.review-btn {
+  width: 100%; min-height: 48px;
+  border-radius: var(--r-pill);
+  background: var(--navy); color: #fff;
+  font-weight: 800; font-size: 15px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  box-shadow: var(--shadow-2);
+  transition: transform var(--t-fast) var(--ease-snap);
+}
+.review-btn:active { transform: scale(0.98); }
+.review-actions { display: flex; gap: var(--s-3); margin-top: var(--s-4); }
+.review-actions .btn { flex: 1; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

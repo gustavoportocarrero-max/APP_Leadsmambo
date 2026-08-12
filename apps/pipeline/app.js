@@ -130,7 +130,17 @@
     createBackBtn: $("createBackBtn"),
     createCancelBtn: $("createCancelBtn"),
     createSubmitBtn: $("createSubmitBtn"),
+    // revisión semanal ("Terminé de revisar")
+    reviewBar: $("reviewBar"),
+    reviewDoneBtn: $("reviewDoneBtn"),
+    reviewOverlay: $("reviewOverlay"),
+    reviewYesBtn: $("reviewYesBtn"),
+    reviewNoBtn: $("reviewNoBtn"),
+    reviewWarnOverlay: $("reviewWarnOverlay"),
+    reviewWarnOkBtn: $("reviewWarnOkBtn"),
   };
+
+  const STORAGE_REVIEW = "mambo.pipeline.review"; // demo: estado de revisión por semana/partner
 
   /* ---------- estado de creación ---------- */
   let metaCache = null;                 // { fields, organizations, partners, fieldsFound }
@@ -352,6 +362,9 @@
   function updateFabVisibility() {
     if (!els.fabWrap) return;
     els.fabWrap.hidden = !canCreate();
+    // "Terminé de revisar": solo para partners (identidad de partner del login);
+    // el admin (currentUser vacío) y los correos sin mapear no lo ven.
+    if (els.reviewBar) els.reviewBar.hidden = !currentUser;
   }
 
   /* ============================================================
@@ -1222,6 +1235,79 @@
   }
 
   /* ============================================================
+     Revisión semanal — "Terminé de revisar"
+     ============================================================ */
+  // Lunes de la semana actual en hora Perú (UTC-5 fijo), "YYYY-MM-DD".
+  // Misma lógica que api/_week.js para que cliente y servidor coincidan.
+  function peruWeekStart() {
+    const w = new Date(Date.now() + (-300) * 60000); // desplaza a "pared" Perú; leer con getUTC*
+    const day = w.getUTCDay();               // 0=dom … 6=sáb
+    const diff = day === 0 ? 6 : day - 1;    // días desde el lunes
+    const mon = new Date(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate() - diff));
+    return `${mon.getUTCFullYear()}-${String(mon.getUTCMonth() + 1).padStart(2, "0")}-${String(mon.getUTCDate()).padStart(2, "0")}`;
+  }
+
+  // Modo demo: estado de revisión en localStorage { [week]: { [partner]: {confirmed,no_count,last} } }.
+  function demoRecordReview(partner, week, answer) {
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(STORAGE_REVIEW) || "{}"); } catch (_) {}
+    const wk = all[week] || (all[week] = {});
+    const cur = wk[partner] || { confirmed: false, no_count: 0, last: "" };
+    cur.confirmed = cur.confirmed || answer === "si";
+    if (answer === "no") cur.no_count += 1;
+    cur.last = answer;
+    wk[partner] = cur;
+    localStorage.setItem(STORAGE_REVIEW, JSON.stringify(all));
+    return { no_count: cur.no_count, confirmed: cur.confirmed, last_status: cur.last };
+  }
+
+  function showReview() {
+    if (!currentUser) return;
+    els.reviewOverlay.classList.add("open");
+    els.reviewOverlay.setAttribute("aria-hidden", "false");
+  }
+  function hideReview() {
+    els.reviewOverlay.classList.remove("open");
+    els.reviewOverlay.setAttribute("aria-hidden", "true");
+  }
+  function showReviewWarn() {
+    els.reviewWarnOverlay.classList.add("open");
+    els.reviewWarnOverlay.setAttribute("aria-hidden", "false");
+  }
+  function hideReviewWarn() {
+    els.reviewWarnOverlay.classList.remove("open");
+    els.reviewWarnOverlay.setAttribute("aria-hidden", "true");
+  }
+
+  async function submitReview(answer) {
+    const partner = currentUser;
+    if (!partner) return;
+    const week = peruWeekStart();
+    // evita doble envío mientras responde
+    els.reviewYesBtn.disabled = true; els.reviewNoBtn.disabled = true;
+    let result;
+    try {
+      result = (mode === "supabase")
+        ? await SupaDeals.recordReview(partner, currentEmail, week, answer)
+        : demoRecordReview(partner, week, answer);
+    } catch (e) {
+      console.error("No se pudo registrar la revisión:", e);
+      els.reviewYesBtn.disabled = false; els.reviewNoBtn.disabled = false;
+      toast("No se pudo registrar. Reintenta.");
+      return;
+    }
+    els.reviewYesBtn.disabled = false; els.reviewNoBtn.disabled = false;
+    hideReview();
+    if (answer === "si") {
+      toast("¡Gracias! Revisión registrada ✓");
+    } else {
+      toast("Anotado. Recuerda actualizar tu base.");
+      // A la SEGUNDA vez (o más) que dice "No" en la semana → advertencia.
+      if (result && Number(result.no_count) >= 2) showReviewWarn();
+    }
+  }
+
+  /* ============================================================
      Realtime — cambios de otros partners
      ============================================================ */
   function onRealtime(type, deal, oldId) {
@@ -1408,6 +1494,12 @@
     });
     els.cOrgNewBtn.addEventListener("click", switchOrgNew);
     els.cOrgExistingBtn.addEventListener("click", switchOrgExisting);
+
+    /* ---- revisión semanal ---- */
+    els.reviewDoneBtn.addEventListener("click", showReview);
+    els.reviewYesBtn.addEventListener("click", () => submitReview("si"));
+    els.reviewNoBtn.addEventListener("click", () => submitReview("no"));
+    els.reviewWarnOkBtn.addEventListener("click", hideReviewWarn);
     // cerrar la lista al hacer click fuera del combobox
     document.addEventListener("click", (e) => {
       if (els.createPanel.classList.contains("open") &&
@@ -1419,7 +1511,9 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if (els.identityOverlay.classList.contains("open")) { if (currentUser) hideIdentity(); }
+      if (els.reviewWarnOverlay.classList.contains("open")) hideReviewWarn();
+      else if (els.reviewOverlay.classList.contains("open")) hideReview();
+      else if (els.identityOverlay.classList.contains("open")) { if (currentUser) hideIdentity(); }
       else if (els.createPanel.classList.contains("open")) closeCreate();
       else if (els.detail.classList.contains("open")) closeDetail();
     });

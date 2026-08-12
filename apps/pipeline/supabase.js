@@ -153,6 +153,17 @@ window.SupaDeals = (function () {
     return rowToDeal(data);
   }
 
+  // Registra la respuesta de "Terminé de revisar" ("si"/"no") de forma atómica
+  // (RPC record_weekly_review). Devuelve { no_count, confirmed, last_status }.
+  async function recordReview(partner, email, weekStart, answer) {
+    const { data, error } = await client.rpc("record_weekly_review", {
+      p_partner: partner, p_email: email || "", p_week: weekStart, p_answer: answer,
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return row || { no_count: 0, confirmed: answer === "si", last_status: answer };
+  }
+
   // access_token de la sesión actual (para autenticar las funciones /api que crean
   // negocios). Null si no hay sesión.
   async function getAccessToken() {
@@ -200,6 +211,7 @@ window.SupaDeals = (function () {
     createDeal,
     deleteDeal,
     logActivity,
+    recordReview,
     subscribe,
     rowToDeal,
     editablePatch,
