@@ -1,0 +1,10 @@
+{
+  "name": "mambo-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "mambo · Pipeline — funciones serverless (envío de correos por SMTP).",
+  "dependencies": {
+    "nodemailer": "^6.9.16"
+  }
+}

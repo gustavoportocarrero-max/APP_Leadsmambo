@@ -1,5 +1,5 @@
 // ============================================================
-// mambo · Pipeline — RECORDATORIOS POR CORREO (Resend)
+// mambo · Pipeline — RECORDATORIOS POR CORREO (SMTP Gmail / Google Workspace)
 //
 // Cron externo (cron-job.org), protegido con CRON_SECRET. Dos modos:
 //   ?mode=all      → MARTES 11am: correo a los 5 partners (recordatorio general).
@@ -9,11 +9,16 @@
 //
 // Tono de urgencia con alerta roja 🚨.
 //
+// Envío por SMTP autenticado del buzón de Google Workspace (nodemailer), con una
+// "contraseña de aplicación". Los correos salen remitidos desde GMAIL_USER, con
+// nombre visible "Mambo Pipeline". Al salir del propio buzón de Google, quedan
+// firmados por SPF/DKIM/DMARC de Google automáticamente (sin verificar dominio).
+//
 // Variables de entorno:
 //   CRON_SECRET                (requerida) protege el endpoint
-//   RESEND_API_KEY             (requerida) API key de Resend
-//   RESEND_FROM                (requerida) remitente verificado, ej.
-//                              "Mambo Pipeline <pipeline@tudominio.com>"
+//   GMAIL_USER                 (requerida) correo remitente (ej. gustavo.portocarrero@mambo.pe)
+//   GMAIL_APP_PASSWORD         (requerida) contraseña de aplicación de 16 caracteres
+//   SMTP_PORT                  (opcional)  465 (SSL, por defecto) o 587 (TLS/STARTTLS)
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  (requeridas solo para mode=pending)
 //   PARTNER_EMAILS             (opcional) override de correos por partner
 //   PIPEDRIVE_ALLOWED_OWNERS   (opcional) override de la lista de partners
@@ -22,6 +27,7 @@
 //         Agrega &dry=1 para NO enviar (solo ver a quién se enviaría).
 // ============================================================
 
+import nodemailer from "nodemailer";
 import { partners, partnerEmails, weekStartStr, mondayStartMs, computeCompliance } from "./_week.js";
 
 const SUBJECT = "🚨 ACTUALIZA TU BASE 🚨";
@@ -45,15 +51,16 @@ function emailHtml(partnerName) {
   </div>`;
 }
 
-async function sendEmail(apiKey, from, to, subject, html) {
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: [to], subject, html }),
+// Crea el transporter SMTP de Gmail/Workspace. La contraseña de aplicación puede
+// venir con espacios (Google la muestra en bloques de 4); se limpian.
+function makeTransport(user, appPassword) {
+  const port = Number(process.env.SMTP_PORT || 465);
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port,
+    secure: port === 465, // 465 → SSL; 587 → STARTTLS
+    auth: { user, pass: String(appPassword || "").replace(/\s+/g, "") },
   });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`Resend HTTP ${r.status} ${JSON.stringify(j).slice(0, 200)}`);
-  return j;
 }
 
 export default async function handler(req, res) {
@@ -70,12 +77,13 @@ export default async function handler(req, res) {
   const mode = (req.query && req.query.mode) === "pending" ? "pending" : "all";
   const dry = req.query && req.query.dry === "1";
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM;
-  if (!dry && (!apiKey || !from)) {
-    res.status(500).json({ ok: false, error: "Faltan RESEND_API_KEY / RESEND_FROM." });
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  if (!dry && (!gmailUser || !gmailPass)) {
+    res.status(500).json({ ok: false, error: "Faltan GMAIL_USER / GMAIL_APP_PASSWORD." });
     return;
   }
+  const from = `"Mambo Pipeline" <${gmailUser}>`;
 
   const list = partners();
   const emails = partnerEmails();
@@ -106,13 +114,18 @@ export default async function handler(req, res) {
     }
 
     // Enviar (o simular)
+    const transporter = dry ? null : makeTransport(gmailUser, gmailPass);
     const sent = [], failed = [], skipped = [];
     for (const p of recipients) {
       const to = emails[p];
       if (!to) { skipped.push({ partner: p, reason: "sin correo" }); continue; }
       if (dry) { sent.push({ partner: p, to, dry: true }); continue; }
-      try { await sendEmail(apiKey, from, to, SUBJECT, emailHtml(p)); sent.push({ partner: p, to }); }
-      catch (e) { failed.push({ partner: p, to, error: String(e && e.message ? e.message : e) }); }
+      try {
+        await transporter.sendMail({ from, to, subject: SUBJECT, html: emailHtml(p) });
+        sent.push({ partner: p, to });
+      } catch (e) {
+        failed.push({ partner: p, to, error: String(e && e.message ? e.message : e) });
+      }
     }
 
     const summary = {
