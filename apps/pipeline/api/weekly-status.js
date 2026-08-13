@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     const compliance = computeCompliance(list, activityRows, reviewRows, emails);
 
     // Mensaje simple: nombre + ✅/❌
-    const lines = ["Guti, te adjunto la lista de esta semana:"];
+    const lines = ["Guti, te adjunto quienes cumplieron con las modificaciones esta semana:"];
     compliance.forEach((c) => lines.push(`${c.partner} ${c.ok ? "✅" : "❌"}`));
     const cumplen = compliance.filter((c) => c.ok).length;
     const text = lines.join("\n");
