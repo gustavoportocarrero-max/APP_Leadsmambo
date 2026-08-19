@@ -31,6 +31,11 @@
 // Manual: GET /api/weekly-email?key=<CRON_SECRET>&mode=all   (o mode=pending)
 //         &dry=1   → NO envía ni reserva (solo muestra a quién iría + resumen).
 //         &force=1 → reenvía aunque ya se haya enviado esta semana (ignora idempotencia).
+//         &testTo=correo → PRUEBA: todos los correos van a esa dirección (no a los
+//                  partners reales); el asunto/cuerpo indica de quién era cada uno y
+//                  el resumen A/B/C sigue siendo el del partner original. Ignora la
+//                  idempotencia (puedes reenviarte cuantas veces quieras). Los cron
+//                  jobs NO llevan este parámetro.
 // ============================================================
 
 import nodemailer from "nodemailer";
@@ -78,9 +83,15 @@ function pendingHtml(pending) {
   return h;
 }
 
-function emailHtml(partnerName, pending) {
+function emailHtml(partnerName, pending, testForLabel) {
+  const testBanner = testForLabel
+    ? `<div style="background:#FFF3CD;color:#7a5c00;border:1px solid #ffe08a;border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px;font-weight:700">
+         🧪 PRUEBA — este correo era originalmente para: ${esc(testForLabel)}
+       </div>`
+    : "";
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1D0446">
+    ${testBanner}
     <div style="background:#FA5478;color:#fff;border-radius:14px;padding:18px 20px;text-align:center">
       <div style="font-size:22px;font-weight:800;letter-spacing:.5px">🚨 ACTUALIZA TU BASE 🚨</div>
     </div>
@@ -124,6 +135,13 @@ export default async function handler(req, res) {
   const mode = (req.query && req.query.mode) === "pending" ? "pending" : "all";
   const dry = req.query && req.query.dry === "1";
   const force = req.query && req.query.force === "1";
+  // Prueba: si viene &testTo=correo, TODOS los correos van a esa dirección (no a
+  // los partners reales) y se ignora la idempotencia (para poder reenviarme).
+  const testTo = (req.query && req.query.testTo) ? String(req.query.testTo).trim() : "";
+  if (testTo && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(testTo)) {
+    res.status(400).json({ ok: false, error: `testTo no parece un correo válido: ${testTo}` });
+    return;
+  }
 
   const gmailUser = process.env.GMAIL_USER;
   const gmailPass = process.env.GMAIL_APP_PASSWORD;
@@ -137,10 +155,11 @@ export default async function handler(req, res) {
   const emails = partnerEmails();
   const weekStart = weekStartStr();
 
-  // Supabase: requerido para idempotencia (envío real) y para compliance (mode=pending).
+  // Supabase: requerido para compliance (mode=pending) y para la idempotencia del
+  // envío real (que NO aplica en modo prueba con testTo).
   const sbUrl = process.env.SUPABASE_URL;
   const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const needSupabase = !dry || mode === "pending";
+  const needSupabase = mode === "pending" || (!dry && !testTo);
   if (needSupabase && (!sbUrl || !sbKey)) {
     res.status(500).json({ ok: false, error: "Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY." });
     return;
@@ -193,22 +212,28 @@ export default async function handler(req, res) {
     const sent = [], failed = [], skipped = [];
     try {
       for (const p of recipients) {
-        const to = emails[p];
+        // En modo prueba, TODO va a testTo (no al correo real del partner).
+        const to = testTo || emails[p];
         if (!to) { skipped.push({ partner: p, reason: "sin correo" }); continue; }
-        if (dry) { sent.push({ partner: p, to, dry: true }); continue; }
+        if (dry) { sent.push({ partner: p, to, para_original: p, dry: true }); continue; }
 
-        // Idempotencia: reservar antes de enviar (force libera y reserva de nuevo).
-        if (force) await unreserve(p);
-        let reserved;
-        try { reserved = await reserve(p); }
-        catch (e) { failed.push({ partner: p, to, error: "reserva: " + (e.message || e) }); continue; }
-        if (!reserved) { skipped.push({ partner: p, reason: "ya enviado esta semana (idempotencia)" }); continue; }
+        // Idempotencia: solo en envío real a partners (no en modo prueba con testTo).
+        if (!testTo) {
+          if (force) await unreserve(p);
+          let reserved;
+          try { reserved = await reserve(p); }
+          catch (e) { failed.push({ partner: p, to, error: "reserva: " + (e.message || e) }); continue; }
+          if (!reserved) { skipped.push({ partner: p, reason: "ya enviado esta semana (idempotencia)" }); continue; }
+        }
 
+        // El asunto y el cuerpo indican de quién era el correo (solo en prueba).
+        // El resumen A/B/C sigue siendo el del partner original (pendingByPartner[p]).
+        const subject = testTo ? `[PRUEBA — originalmente para: ${p}] ${SUBJECT}` : SUBJECT;
         try {
-          await transporter.sendMail({ from, to, subject: SUBJECT, html: emailHtml(p, pendingByPartner[p]) });
-          sent.push({ partner: p, to });
+          await transporter.sendMail({ from, to, subject, html: emailHtml(p, pendingByPartner[p], testTo ? p : null) });
+          sent.push(testTo ? { partner: p, to, para_original: p } : { partner: p, to });
         } catch (e) {
-          await unreserve(p); // liberar para poder reintentar
+          if (!testTo) await unreserve(p); // liberar para poder reintentar
           failed.push({ partner: p, to, error: String(e && e.message ? e.message : e) });
         }
       }
@@ -228,6 +253,7 @@ export default async function handler(req, res) {
     const summary = {
       ok: failed.length === 0,
       mode, semana: weekStart, dry: !!dry, force: !!force,
+      testTo: testTo || undefined,
       destinatarios: recipients,
       enviados: sent.length, fallidos: failed.length, omitidos: skipped.length,
       resumen_pipedrive: pd.ok ? "incluido" : ("omitido (" + pendingWarning + ")"),
