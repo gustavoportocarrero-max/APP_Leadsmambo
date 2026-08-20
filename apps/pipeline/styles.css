@@ -786,18 +786,79 @@ input[type="range"]::-moz-range-thumb {
 /* ============================================================
    "Terminé de revisar" — barra + modal Sí/No
    ============================================================ */
-.review-bar { padding: var(--s-3) var(--s-4) 0; }
+.review-bar { padding: var(--s-3) var(--s-4) 0; display: flex; gap: var(--s-2); }
 .review-bar[hidden] { display: none; }
 .review-btn {
-  width: 100%; min-height: 48px;
+  flex: 1; min-height: 48px;
   border-radius: var(--r-pill);
   background: var(--navy); color: #fff;
-  font-weight: 800; font-size: 15px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-weight: 800; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   box-shadow: var(--shadow-2);
   transition: transform var(--t-fast) var(--ease-snap);
 }
 .review-btn:active { transform: scale(0.98); }
+.review-btn.alt { background: var(--coral); box-shadow: var(--shadow-coral); }
+
+/* ============================================================
+   MIS PENDIENTES — checklist del partner
+   ============================================================ */
+.pending-block { margin-bottom: var(--s-6); }
+.pending-block h3 {
+  font-family: var(--font-display); font-weight: 800; font-size: 16px;
+  letter-spacing: var(--track-display); margin: 0 0 4px;
+}
+.pending-block .pending-q { font-size: 13px; font-weight: 600; color: var(--ink-soft); margin: 0 0 var(--s-3); }
+.pending-empty { color: var(--ink-soft); font-size: 13px; font-weight: 600; padding: 8px 0; }
+.pending-loading { color: var(--ink-soft); font-size: 14px; font-weight: 600; padding: var(--s-5) 0; text-align: center; }
+
+.pending-item {
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+  background: var(--surface-raised); padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-2);
+}
+.pending-item .pi-head { display: flex; align-items: flex-start; gap: var(--s-2); }
+.pending-item .pi-info { min-width: 0; flex: 1; }
+.pending-item .pi-title { font-weight: 700; font-size: 14px; color: var(--ink); }
+.pending-item .pi-sub { font-size: 12px; color: var(--ink-soft); font-weight: 600; margin-top: 2px; }
+.pending-item .pi-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.pi-btn {
+  min-height: 34px; padding: 0 12px; border-radius: var(--r-pill);
+  font-weight: 700; font-size: 13px; border: 1px solid var(--hairline);
+  background: var(--surface); color: var(--eggplant);
+  transition: transform var(--t-fast) var(--ease-snap);
+}
+.pi-btn:active { transform: scale(0.96); }
+.pi-btn.check { background: var(--navy); color: #fff; border-color: transparent; }
+.pi-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.pi-note { margin-top: var(--s-2); display: none; }
+.pi-note.open { display: block; }
+.pi-note textarea {
+  width: 100%; border-radius: var(--r-md); border: 1px solid var(--hairline);
+  background: var(--surface); color: var(--ink); padding: 10px var(--s-3);
+  font-size: 14px; min-height: 60px; resize: vertical;
+}
+.pi-note .pi-note-actions { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end; }
+
+/* bloque C: campos por completar */
+.pi-fields { margin-top: var(--s-3); display: flex; flex-direction: column; gap: var(--s-3); }
+.pi-field { display: flex; flex-direction: column; gap: 4px; }
+.pi-field > label { font-size: 12px; font-weight: 700; color: var(--ink); }
+.pi-field select, .pi-field input {
+  border-radius: var(--r-md); border: 1px solid var(--hairline);
+  background: var(--surface); color: var(--ink);
+  padding: 9px var(--s-3); font-size: 14px;
+}
+.pi-field select {
+  appearance: none; -webkit-appearance: none; padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B6582' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+.pi-field .pi-row2 { display: flex; gap: var(--s-2); }
+.pi-field .pi-row2 > * { flex: 1; min-width: 0; }
+.pi-save { align-self: flex-start; margin-top: 2px; background: var(--coral); color: #fff; border-color: transparent; }
+.pi-missing-tag { font-size: 11px; font-weight: 700; color: var(--coral); }
 .review-actions { display: flex; gap: var(--s-3); margin-top: var(--s-4); }
 .review-actions .btn { flex: 1; }
 

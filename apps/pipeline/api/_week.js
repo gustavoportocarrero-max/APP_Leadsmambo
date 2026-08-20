@@ -36,6 +36,14 @@ export function partners() {
   return raw.length ? raw : DEFAULT_PARTNERS.slice();
 }
 
+// Partner (nombre) para un correo, o "" si el correo no es de un partner (p.ej. admin).
+export function partnerForEmail(email) {
+  const e = norm(email);
+  const map = partnerEmails();
+  for (const [name, addr] of Object.entries(map)) if (norm(addr) === e) return name;
+  return "";
+}
+
 export function partnerEmails() {
   const map = { ...DEFAULT_PARTNER_EMAILS };
   if (process.env.PARTNER_EMAILS) {

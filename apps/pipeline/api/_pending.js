@@ -153,6 +153,7 @@ export async function fetchPendingByPartner(partnersList) {
       const stage = STAGE_BY_PD_ID[Number(d.stage_id)] || "target";
       if (!FOUR_STAGES.has(stage)) continue; // target/nurturing fuera
 
+      const id = Number(d.id);
       const title = (d.title || "(sin título)").toString();
       const org = (d.org_name || (d.org_id && d.org_id.name) || "").toString();
       const stageLabel = STAGE_LABEL[stage];
@@ -161,15 +162,16 @@ export async function fetchPendingByPartner(partnersList) {
       const addMs = d.add_time ? Date.parse(d.add_time.replace(" ", "T") + "Z") : NaN;
       if (!Number.isNaN(addMs) && (now - addMs) > THIRTY_D) {
         const ageDays = Math.floor((now - addMs) / (24 * 60 * 60 * 1000));
-        byPartner[partner].antiguos.push({ title, org, stageLabel, ageDays });
+        byPartner[partner].antiguos.push({ id, title, org, stageLabel, ageDays });
       }
 
       // Bloque B: etapa cierre
-      if (stage === "cierre") byPartner[partner].cierre.push({ title, org });
+      if (stage === "cierre") byPartner[partner].cierre.push({ id, title, org });
 
-      // Bloque C: campos obligatorios faltantes
-      const missing = (REQUIRED[stage] || []).filter((f) => !has(f, d)).map((f) => FIELD_LABEL[f]);
-      if (missing.length) byPartner[partner].incompletos.push({ title, org, stageLabel, missing });
+      // Bloque C: campos obligatorios faltantes. `missing` = [{key, label}] para que
+      // quien consuma sepa qué control mostrar (frontend) o solo la etiqueta (correo).
+      const missing = (REQUIRED[stage] || []).filter((f) => !has(f, d)).map((f) => ({ key: f, label: FIELD_LABEL[f] }));
+      if (missing.length) byPartner[partner].incompletos.push({ id, title, org, stageLabel, missing });
     }
 
     return { ok: true, byPartner, camposDescubiertos: { ...keys, industria: !!industryKey }, negocios: deals.length };

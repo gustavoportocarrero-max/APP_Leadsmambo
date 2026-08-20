@@ -27,6 +27,8 @@
 //   PIPEDRIVE_COMPANY_DOMAIN   (opcional)
 //   PARTNER_EMAILS             (opcional)  override de correos por partner
 //   PIPEDRIVE_ALLOWED_OWNERS   (opcional)  override de la lista de partners
+//   APP_URL                    (opcional)  base de la app para el enlace (def. app-leadsmambo.vercel.app)
+//   PIPEDRIVE_URL              (opcional)  enlace a Pipedrive (def. mambo.pipedrive.com)
 //
 // Manual: GET /api/weekly-email?key=<CRON_SECRET>&mode=all   (o mode=pending)
 //         &dry=1   → NO envía ni reserva (solo muestra a quién iría + resumen).
@@ -77,8 +79,16 @@ function pendingHtml(pending) {
   h += C.length
     ? `<ul style="padding-left:18px;margin:0">` + C.map((d) => li(
         `${name(d)} <span style="color:#6B6582">(${esc(d.stageLabel)})</span><br/>` +
-        `<span style="color:#B23A57">Faltan: ${d.missing.map(esc).join(", ")}</span>`)).join("") + `</ul>`
+        `<span style="color:#B23A57">Faltan: ${d.missing.map((m) => esc(m.label)).join(", ")}</span>`)).join("") + `</ul>`
     : empty("Sin negocios con campos incompletos ✅");
+
+  // Enlaces (normales, no interactivos): a la app y a Pipedrive.
+  const appUrl = process.env.APP_URL || "https://app-leadsmambo.vercel.app";
+  const pipedriveUrl = process.env.PIPEDRIVE_URL || "https://mambo.pipedrive.com";
+  h += `<div style="margin:24px 0 0">
+    <a href="${esc(appUrl)}/#pendientes" style="display:inline-block;background:#1D0446;color:#fff;text-decoration:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;margin:0 8px 8px 0">Ver mis pendientes en la app →</a>
+    <a href="${esc(pipedriveUrl)}" style="display:inline-block;background:#E7EEFF;color:#1E56CD;text-decoration:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;margin:0 8px 8px 0">Ir a Pipedrive →</a>
+  </div>`;
 
   return h;
 }

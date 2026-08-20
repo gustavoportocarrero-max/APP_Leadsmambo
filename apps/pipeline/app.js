@@ -130,9 +130,14 @@
     createBackBtn: $("createBackBtn"),
     createCancelBtn: $("createCancelBtn"),
     createSubmitBtn: $("createSubmitBtn"),
-    // revisión semanal ("Terminé de revisar")
+    // revisión semanal ("Terminé de revisar") + Mis pendientes
     reviewBar: $("reviewBar"),
     reviewDoneBtn: $("reviewDoneBtn"),
+    myPendingBtn: $("myPendingBtn"),
+    pendingPanel: $("pendingPanel"),
+    pendingBody: $("pendingBody"),
+    pendingBackBtn: $("pendingBackBtn"),
+    pendingSubtitle: $("pendingSubtitle"),
     reviewOverlay: $("reviewOverlay"),
     reviewYesBtn: $("reviewYesBtn"),
     reviewNoBtn: $("reviewNoBtn"),
@@ -340,6 +345,7 @@
     updateIdentityChip();
     hideIdentity();
     renderAll();
+    maybeOpenPendingFromHash(); // por si abrió con #pendientes antes de elegir identidad
     toast("Editas como: " + name);
   }
   function updateIdentityChip() {
@@ -423,6 +429,7 @@
     } else {
       renderAll();
     }
+    maybeOpenPendingFromHash(); // deep-link desde el correo (#pendientes)
   }
 
   /* ============================================================
@@ -1308,6 +1315,272 @@
   }
 
   /* ============================================================
+     Mis pendientes — checklist del partner
+     ============================================================ */
+  const STORAGE_PENDING_RESOLVED = "mambo.pipeline.pendingresolved"; // demo: resueltos por semana
+
+  // Asegura metaCache (opciones de campos) para los desplegables del bloque C.
+  async function ensureMeta() {
+    if (metaCache) return metaCache;
+    const cached = loadMetaCache();
+    if (cached) { metaCache = cached; return metaCache; }
+    try {
+      metaCache = (mode === "supabase") ? await fetchMeta() : buildDemoMeta();
+      saveMetaCache(metaCache);
+    } catch (e) { console.warn("meta (pendientes):", e); metaCache = buildDemoMeta(); }
+    return metaCache;
+  }
+
+  async function fetchMyPending() {
+    const token = await SupaDeals.getAccessToken();
+    if (!token) throw new Error("Sesión no disponible. Vuelve a iniciar sesión.");
+    const r = await fetch("/api/my-pending", { headers: { Authorization: "Bearer " + token }, cache: "no-store" });
+    let j = {}; try { j = await r.json(); } catch (_) {}
+    if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return j.blocks || { A: [], B: [], C: [] };
+  }
+
+  /* ---- modo demo: resueltos por semana + acciones locales ---- */
+  function loadDemoResolved() { try { return JSON.parse(localStorage.getItem(STORAGE_PENDING_RESOLVED) || "{}"); } catch (_) { return {}; } }
+  function demoResolvedSet() {
+    const all = loadDemoResolved(); const wk = peruWeekStart();
+    return new Set(((all[wk] && all[wk][currentUser]) || []));
+  }
+  function demoMarkResolved(id) {
+    const all = loadDemoResolved(); const wk = peruWeekStart();
+    all[wk] = all[wk] || {}; const arr = all[wk][currentUser] = all[wk][currentUser] || [];
+    if (!arr.includes(id)) arr.push(id);
+    localStorage.setItem(STORAGE_PENDING_RESOLVED, JSON.stringify(all));
+  }
+  function buildDemoPending() {
+    const FOUR = new Set(["contacto", "primera", "propuesta", "cierre"]);
+    const label = (s) => (stageById[s] ? stageById[s].label : s);
+    const resolved = demoResolvedSet();
+    const reqDemo = {
+      contacto: ["industria", "client_type", "source"],
+      primera: ["industria", "client_type", "source", "prob"],
+      propuesta: ["industria", "client_type", "source", "prob", "vertical", "value", "sale_type", "close"],
+      cierre: ["industria", "client_type", "source", "prob", "vertical", "value", "sale_type", "close"],
+    };
+    const missLabel = { industria: "Industria", client_type: "Tipo de cliente", source: "Fuente lead", prob: "Probabilidad", vertical: "Vertical", value: "Valor (monto)", sale_type: "Tipo de Venta", close: "Fecha de cierre prevista" };
+    const hasField = (d, k) => {
+      switch (k) {
+        case "industria": return !!d.industry; case "client_type": return !!d.clientType;
+        case "source": return !!d.source; case "vertical": return !!d.vertical;
+        case "sale_type": return !!d.saleType; case "prob": return d.prob !== null && d.prob !== undefined;
+        case "value": return Number(d.amount) > 0; case "close": return !!d.closeDate;
+        default: return true;
+      }
+    };
+    const A = [], B = [], C = [];
+    deals.filter((d) => d.owner === currentUser && d.status === "activo" && FOUR.has(d.stage)).forEach((d) => {
+      if (!resolved.has(d.id)) {
+        A.push({ id: d.id, title: d.title, org: d.org, stageLabel: label(d.stage), ageDays: "—" });
+        if (d.stage === "cierre") B.push({ id: d.id, title: d.title, org: d.org });
+      }
+      const missing = (reqDemo[d.stage] || []).filter((k) => !hasField(d, k)).map((k) => ({ key: k, label: missLabel[k] }));
+      if (missing.length) C.push({ id: d.id, title: d.title, org: d.org, stageLabel: label(d.stage), missing });
+    });
+    return { A, B, C };
+  }
+
+  /* ---- render ---- */
+  function pendingFieldCtrl(f) {
+    const key = f.key, label = escapeHtml(f.label);
+    const listOpts = {
+      industria: (metaCache && metaCache.fields.industry) || [],
+      client_type: (metaCache && metaCache.fields.client_type) || [],
+      country: (typeof COUNTRIES !== "undefined" ? COUNTRIES : []),
+      source: (metaCache && metaCache.fields.source) || [],
+      vertical: (metaCache && metaCache.fields.vertical) || [],
+      sale_type: (metaCache && metaCache.fields.sale_type) || [],
+    };
+    if (Object.prototype.hasOwnProperty.call(listOpts, key)) {
+      const opts = listOpts[key].map((o) => { const l = typeof o === "string" ? o : o.label; return `<option value="${escapeAttr(l)}">${escapeHtml(l)}</option>`; }).join("");
+      return `<div class="pi-field"><label>${label}</label><select data-field="${key}"><option value="">— Seleccionar —</option>${opts}</select></div>`;
+    }
+    if (key === "person") {
+      return `<div class="pi-field"><label>${label}</label>
+        <input type="text" data-field="person" data-part="name" placeholder="Nombre" />
+        <div class="pi-row2">
+          <input type="tel" data-field="person" data-part="phone" placeholder="Teléfono (opc.)" />
+          <input type="email" data-field="person" data-part="email" placeholder="Correo (opc.)" />
+        </div></div>`;
+    }
+    if (key === "prob") return `<div class="pi-field"><label>${label}</label><input type="number" min="0" max="100" step="5" data-field="prob" placeholder="0–100" /></div>`;
+    if (key === "value") return `<div class="pi-field"><label>${label} (US$)</label><input type="number" min="0" step="1000" data-field="value" placeholder="0" /></div>`;
+    if (key === "close") {
+      const months = MONTHS_ES.map((n, i) => `<option value="${i + 1}">${n}</option>`).join("");
+      const years = CLOSE_YEARS.map((y) => `<option value="${y}">${y}</option>`).join("");
+      return `<div class="pi-field"><label>${label}</label><div class="pi-row2">
+        <select data-field="close" data-part="month"><option value="">— Mes —</option>${months}</select>
+        <select data-field="close" data-part="year"><option value="">— Año —</option>${years}</select>
+      </div></div>`;
+    }
+    return "";
+  }
+
+  function renderPending(blocks) {
+    const A = blocks.A || [], B = blocks.B || [], C = blocks.C || [];
+    const sub = (d) => `${escapeHtml(d.org || "")}${d.stageLabel ? ` · ${escapeHtml(d.stageLabel)}` : ""}${(d.ageDays && d.ageDays !== "—") ? ` · ${d.ageDays} días` : ""}`;
+    const itemAB = (d) => `
+      <div class="pending-item" data-id="${d.id}">
+        <div class="pi-head">
+          <div class="pi-info"><div class="pi-title">${escapeHtml(d.title)}</div><div class="pi-sub">${sub(d)}</div></div>
+          <div class="pi-actions">
+            <button class="pi-btn" data-act="edit">Editar</button>
+            <button class="pi-btn check" data-act="check" title="Marcar revisado">✓</button>
+          </div>
+        </div>
+        <div class="pi-note" data-note>
+          <textarea placeholder="Escribe un comentario para este negocio…"></textarea>
+          <div class="pi-note-actions">
+            <button class="pi-btn" data-act="note-cancel">Cancelar</button>
+            <button class="pi-btn pi-save" data-act="note-save">Guardar comentario</button>
+          </div>
+        </div>
+      </div>`;
+    const itemC = (d) => `
+      <div class="pending-item" data-id="${d.id}">
+        <div class="pi-head"><div class="pi-info">
+          <div class="pi-title">${escapeHtml(d.title)}</div>
+          <div class="pi-sub">${escapeHtml(d.org || "")}${d.stageLabel ? ` · ${escapeHtml(d.stageLabel)}` : ""}</div>
+          <div class="pi-missing-tag">Faltan: ${d.missing.map((m) => escapeHtml(m.label)).join(", ")}</div>
+        </div></div>
+        <div class="pi-fields">
+          ${d.missing.map(pendingFieldCtrl).join("")}
+          <button class="pi-btn pi-save" data-act="field-save">Guardar cambios</button>
+        </div>
+      </div>`;
+
+    els.pendingBody.innerHTML =
+      `<div class="pending-block" data-block="A">
+        <h3>Negocios que no has tocado</h3>
+        <div class="pending-q">¿Se debe hacer algo con alguno de estos negocios?</div>
+        ${A.length ? A.map(itemAB).join("") : `<div class="pending-empty">Sin negocios antiguos pendientes ✅</div>`}
+      </div>
+      <div class="pending-block" data-block="B">
+        <h3>Follow-up y cierre</h3>
+        <div class="pending-q">¿Hay algún comentario que puedas agregar que actualice estos negocios?</div>
+        ${B.length ? B.map(itemAB).join("") : `<div class="pending-empty">Sin negocios en Follow-up y cierre ✅</div>`}
+      </div>
+      <div class="pending-block" data-block="C">
+        <h3>Campos por completar</h3>
+        <div class="pending-q">Estos negocios tienen campos obligatorios incompletos:</div>
+        ${C.length ? C.map(itemC).join("") : `<div class="pending-empty">Sin negocios con campos incompletos ✅</div>`}
+      </div>`;
+  }
+
+  function openPending() {
+    if (!currentUser) return; // solo partners
+    els.pendingPanel.classList.add("open");
+    els.pendingPanel.setAttribute("aria-hidden", "false");
+    els.pendingBody.scrollTop = 0;
+    els.pendingBody.innerHTML = `<div class="pending-loading">Cargando tus pendientes…</div>`;
+    (async () => {
+      await ensureMeta();
+      try {
+        const blocks = (mode === "supabase") ? await fetchMyPending() : buildDemoPending();
+        renderPending(blocks);
+      } catch (e) {
+        console.error("Mis pendientes:", e);
+        els.pendingBody.innerHTML = `<div class="pending-empty">No se pudieron cargar tus pendientes: ${escapeHtml(e.message || String(e))}</div>`;
+      }
+    })();
+  }
+  function closePending() {
+    els.pendingPanel.classList.remove("open");
+    els.pendingPanel.setAttribute("aria-hidden", "true");
+    if (location.hash === "#pendientes") history.replaceState(null, "", location.pathname + location.search);
+  }
+  async function reloadPending() {
+    try { renderPending((mode === "supabase") ? await fetchMyPending() : buildDemoPending()); }
+    catch (e) { console.error("recargar pendientes:", e); }
+  }
+  function maybeOpenPendingFromHash() {
+    if (location.hash === "#pendientes" && currentUser && !els.pendingPanel.classList.contains("open")) openPending();
+  }
+
+  async function postPendingAction(payload) {
+    if (mode !== "supabase") return demoPendingAction(payload);
+    const token = await SupaDeals.getAccessToken();
+    const r = await fetch("/api/my-pending", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify(payload),
+    });
+    let j = {}; try { j = await r.json(); } catch (_) {}
+    if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return j;
+  }
+  function demoPendingAction(p) {
+    const d = deals.find((x) => x.id === p.dealId);
+    if (p.action === "check" || p.action === "note") {
+      demoMarkResolved(p.dealId);
+      if (p.action === "note" && d) { d.comment = p.comment; saveDemoOverride(d); }
+      return { ok: true, simulated: true };
+    }
+    if (p.action === "field" && d) {
+      const f = p.fields || {};
+      if (f.client_type) d.clientType = f.client_type;
+      if (f.vertical) d.vertical = f.vertical;
+      if (f.sale_type) d.saleType = f.sale_type;
+      if (f.source) d.source = f.source;
+      if (f.industria) d.industry = f.industria;
+      if (f.prob !== undefined && f.prob !== "") d.prob = Number(f.prob);
+      if (f.value !== undefined && f.value !== "") d.amount = Number(f.value);
+      if (f.closeDate) d.closeDate = f.closeDate;
+      saveDemoOverride(d); applyDeal(d); renderAll();
+      return { ok: true, simulated: true };
+    }
+    return { ok: true };
+  }
+
+  function collectPendingFields(item) {
+    const fields = {};
+    item.querySelectorAll("[data-field]").forEach((el) => {
+      const key = el.dataset.field;
+      if (key === "person") {
+        const nameEl = item.querySelector('[data-field="person"][data-part="name"]');
+        const name = (nameEl.value || "").trim();
+        if (name) fields.contact = {
+          name,
+          phone: (item.querySelector('[data-field="person"][data-part="phone"]').value || "").trim(),
+          email: (item.querySelector('[data-field="person"][data-part="email"]').value || "").trim(),
+        };
+        return;
+      }
+      if (key === "close") {
+        const m = item.querySelector('[data-field="close"][data-part="month"]').value;
+        const y = item.querySelector('[data-field="close"][data-part="year"]').value;
+        if (m && y) fields.closeDate = `${y}-${pad2(Number(m))}-${pad2(lastDayOfMonth(Number(y), Number(m)))}`;
+        return;
+      }
+      const v = (el.value || "").trim();
+      if (v !== "") fields[key] = v;
+    });
+    return fields;
+  }
+
+  async function doPendingAction(item, payload, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const res = await postPendingAction(payload);
+      const sim = res && res.simulated ? " (simulado)" : "";
+      const warn = res && res.warnings && res.warnings.length ? " ⚠" : "";
+      if (res && res.warnings && res.warnings.length) console.warn("[mis pendientes] avisos:", res.warnings);
+      if (payload.action === "check") toast("Marcado como revisado ✓");
+      else if (payload.action === "note") toast("Comentario guardado ✓" + sim);
+      else toast("Campos actualizados ✓" + sim + warn);
+      await reloadPending();
+    } catch (e) {
+      console.error("acción pendiente:", e);
+      if (btn) btn.disabled = false;
+      toast("No se pudo: " + (e.message || e));
+    }
+  }
+
+  /* ============================================================
      Realtime — cambios de otros partners
      ============================================================ */
   function onRealtime(type, deal, oldId) {
@@ -1500,6 +1773,35 @@
     els.reviewYesBtn.addEventListener("click", () => submitReview("si"));
     els.reviewNoBtn.addEventListener("click", () => submitReview("no"));
     els.reviewWarnOkBtn.addEventListener("click", hideReviewWarn);
+
+    /* ---- Mis pendientes ---- */
+    els.myPendingBtn.addEventListener("click", openPending);
+    els.pendingBackBtn.addEventListener("click", closePending);
+    els.pendingBody.addEventListener("click", async (e) => {
+      const item = e.target.closest(".pending-item");
+      const btn = e.target.closest("[data-act]");
+      if (!item || !btn) return;
+      const id = Number(item.dataset.id);
+      const act = btn.dataset.act;
+      if (act === "edit") {
+        const n = item.querySelector("[data-note]"); n.classList.add("open");
+        const ta = n.querySelector("textarea"); if (ta) ta.focus();
+      } else if (act === "note-cancel") {
+        const n = item.querySelector("[data-note]"); n.classList.remove("open"); const ta = n.querySelector("textarea"); if (ta) ta.value = "";
+      } else if (act === "check") {
+        await doPendingAction(item, { dealId: id, action: "check" }, btn);
+      } else if (act === "note-save") {
+        const ta = item.querySelector("[data-note] textarea");
+        const comment = (ta.value || "").trim();
+        if (!comment) { toast("Escribe un comentario o usa ✓."); return; }
+        await doPendingAction(item, { dealId: id, action: "note", comment }, btn);
+      } else if (act === "field-save") {
+        const fields = collectPendingFields(item);
+        if (!Object.keys(fields).length) { toast("Completa al menos un campo."); return; }
+        await doPendingAction(item, { dealId: id, action: "field", fields }, btn);
+      }
+    });
+    window.addEventListener("hashchange", maybeOpenPendingFromHash);
     // cerrar la lista al hacer click fuera del combobox
     document.addEventListener("click", (e) => {
       if (els.createPanel.classList.contains("open") &&
@@ -1514,6 +1816,7 @@
       if (els.reviewWarnOverlay.classList.contains("open")) hideReviewWarn();
       else if (els.reviewOverlay.classList.contains("open")) hideReview();
       else if (els.identityOverlay.classList.contains("open")) { if (currentUser) hideIdentity(); }
+      else if (els.pendingPanel.classList.contains("open")) closePending();
       else if (els.createPanel.classList.contains("open")) closeCreate();
       else if (els.detail.classList.contains("open")) closeDetail();
     });
@@ -1549,6 +1852,7 @@
       deals = seedDemoDeals();
       showBanner("Modo demo (sin Supabase). Configura las variables de entorno para datos compartidos.");
       pruneAndRender();
+      maybeOpenPendingFromHash();
       if (!currentUser) showIdentity();
     }
   }

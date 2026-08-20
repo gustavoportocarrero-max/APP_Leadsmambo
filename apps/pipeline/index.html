@@ -49,9 +49,10 @@
     <!-- aviso de conexión (modo demo / error) -->
     <div class="conn-banner" id="connBanner" hidden></div>
 
-    <!-- ===== "TERMINÉ DE REVISAR" (solo partners) ===== -->
+    <!-- ===== ACCIONES DEL PARTNER (solo partners) ===== -->
     <div class="review-bar" id="reviewBar" hidden>
       <button class="review-btn" id="reviewDoneBtn">✓ Terminé de revisar</button>
+      <button class="review-btn alt" id="myPendingBtn">📋 Mis pendientes</button>
     </div>
 
     <!-- ===== FILTROS ===== -->
@@ -305,6 +306,20 @@
       <button class="btn btn-ghost" id="accountCloseBtn" style="width:100%;margin-top:var(--s-2)">Volver</button>
     </div>
   </div>
+
+  <!-- ===== MIS PENDIENTES (checklist del partner) ===== -->
+  <aside class="detail pending-panel" id="pendingPanel" aria-hidden="true">
+    <header class="detail-header">
+      <button class="icon-btn" id="pendingBackBtn" aria-label="Volver">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="titles">
+        <div class="d-org">Mis pendientes</div>
+        <div class="d-title" id="pendingSubtitle">Tu checklist de la semana</div>
+      </div>
+    </header>
+    <div class="detail-body" id="pendingBody"></div>
+  </aside>
 
   <!-- ===== REVISIÓN SEMANAL: ¿Editaste lo que corresponde? ===== -->
   <div class="id-overlay" id="reviewOverlay" aria-hidden="true">
