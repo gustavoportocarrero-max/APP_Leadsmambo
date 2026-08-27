@@ -803,6 +803,13 @@ input[type="range"]::-moz-range-thumb {
 /* ============================================================
    MIS PENDIENTES — checklist del partner
    ============================================================ */
+.pending-help {
+  background: var(--blue-mist); color: var(--navy);
+  border: 1px solid rgba(30, 86, 205, 0.18);
+  border-radius: var(--r-md); padding: 11px var(--s-4);
+  font-size: 13px; font-weight: 600; line-height: 1.45;
+  margin-bottom: var(--s-5);
+}
 .pending-block { margin-bottom: var(--s-6); }
 .pending-block h3 {
   font-family: var(--font-display); font-weight: 800; font-size: 16px;

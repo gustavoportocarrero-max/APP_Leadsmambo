@@ -108,7 +108,15 @@ export default async function handler(req, res) {
   const dealId = parseInt(body.dealId, 10);
   const action = String(body.action || "");
   if (!Number.isFinite(dealId)) { res.status(400).json({ ok: false, error: "Falta dealId numérico." }); return; }
-  if (!["check", "note", "field"].includes(action)) { res.status(400).json({ ok: false, error: "Acción desconocida." }); return; }
+  if (!["check", "note", "field", "resolve"].includes(action)) { res.status(400).json({ ok: false, error: "Acción desconocida." }); return; }
+
+  // ---- resolve: solo marcar resuelto (lo usa "Guardar" del panel de edición, que
+  //      ya sincronizó y registró actividad por su cuenta). No toca Pipedrive. ----
+  if (action === "resolve") {
+    try { await markResolved(dealId); res.status(200).json({ ok: true, action, dealId, resolved: true }); }
+    catch (e) { res.status(502).json({ ok: false, error: String(e && e.message ? e.message : e) }); }
+    return;
+  }
 
   const { token, base } = pdEnv();
   if (!token) { res.status(500).json({ ok: false, error: "Falta PIPEDRIVE_API_TOKEN." }); return; }

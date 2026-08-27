@@ -152,6 +152,7 @@
   let createDraft = null;               // { stage, prob, closeDate }
   let createOrg = { mode: "existing", org: null }; // org elegida: {id?, name}
   let creating = false;                 // envío en curso (evita doble click)
+  let openedFromPending = false;        // el detalle se abrió desde "Mis pendientes"
 
   /* ============================================================
      Persistencia local (solo identidad + lista de exportación)
@@ -632,6 +633,8 @@
     editingId = null;
     draft = null;
     draftEditable = false;
+    // Si venía de "Mis pendientes", vuelve a esa sección (refrescada).
+    if (openedFromPending) { openedFromPending = false; openPending(); }
   }
 
   function updateProbLabel(p) {
@@ -850,6 +853,7 @@
         refreshSaveState();
         return;
       }
+      if (openedFromPending) await resolvePendingForDeal(orig); // guardar resuelve el pendiente
       closeDetail();
       renderAll();
       toast("Negocio cerrado en Pipedrive; sale de la vista activa ✓");
@@ -877,6 +881,9 @@
     await recordActivity(orig, draft, changes, noteText);
     if (res.confirmed) { clearPendingFor(id); }
     else { markPending(id, res.remaining); }
+
+    // Si se editó desde "Mis pendientes", guardar resuelve el pendiente (como el ✓).
+    if (openedFromPending) await resolvePendingForDeal(orig);
 
     closeDetail();
     renderAll();
@@ -1428,15 +1435,8 @@
         <div class="pi-head">
           <div class="pi-info"><div class="pi-title">${escapeHtml(d.title)}</div><div class="pi-sub">${sub(d)}</div></div>
           <div class="pi-actions">
-            <button class="pi-btn" data-act="edit">Editar</button>
-            <button class="pi-btn check" data-act="check" title="Marcar revisado">✓</button>
-          </div>
-        </div>
-        <div class="pi-note" data-note>
-          <textarea placeholder="Escribe un comentario para este negocio…"></textarea>
-          <div class="pi-note-actions">
-            <button class="pi-btn" data-act="note-cancel">Cancelar</button>
-            <button class="pi-btn pi-save" data-act="note-save">Guardar comentario</button>
+            <button class="pi-btn" data-act="edit" title="Abrir el negocio para editarlo">Editar</button>
+            <button class="pi-btn check" data-act="check" title="No hay nada que editar">✓</button>
           </div>
         </div>
       </div>`;
@@ -1454,7 +1454,8 @@
       </div>`;
 
     els.pendingBody.innerHTML =
-      `<div class="pending-block" data-block="A">
+      `<div class="pending-help">Toca <b>“Editar”</b> para actualizar un negocio, o <b>“✓”</b> si no hay nada que cambiar. En ambos casos el pendiente se marca como revisado esta semana.</div>
+      <div class="pending-block" data-block="A">
         <h3>Negocios que no has tocado</h3>
         <div class="pending-q">¿Se debe hacer algo con alguno de estos negocios?</div>
         ${A.length ? A.map(itemAB).join("") : `<div class="pending-empty">Sin negocios antiguos pendientes ✅</div>`}
@@ -1534,6 +1535,28 @@
       return { ok: true, simulated: true };
     }
     return { ok: true };
+  }
+
+  // Encuentra el negocio local (de la lista de la app) que corresponde a un item de
+  // pendientes: por pipedrive_id en Supabase, o por id directo en demo.
+  function localDealForPending(pendingId) {
+    if (mode === "supabase") return deals.find((d) => Number(d.pipedriveId) === Number(pendingId)) || null;
+    return deals.find((d) => d.id === pendingId) || null;
+  }
+  // "Editar" (bloques A/B): abre el MISMO panel de edición de la lista principal.
+  function openDealFromPending(pendingId) {
+    const local = localDealForPending(pendingId);
+    if (!local) { toast("No encuentro este negocio en la app para editarlo."); return; }
+    openedFromPending = true;   // al guardar, se marcará como resuelto
+    closePending();             // el panel de detalle ocupa el frente (mismo z-index)
+    openDetail(local.id);
+  }
+  // Marca el pendiente como resuelto esta semana tras guardar desde el panel.
+  async function resolvePendingForDeal(deal) {
+    try {
+      if (mode === "supabase") { if (deal && deal.pipedriveId) await postPendingAction({ dealId: deal.pipedriveId, action: "resolve" }); }
+      else if (deal) demoMarkResolved(deal.id);
+    } catch (e) { console.warn("resolver pendiente al guardar:", e); }
   }
 
   function collectPendingFields(item) {
@@ -1784,17 +1807,9 @@
       const id = Number(item.dataset.id);
       const act = btn.dataset.act;
       if (act === "edit") {
-        const n = item.querySelector("[data-note]"); n.classList.add("open");
-        const ta = n.querySelector("textarea"); if (ta) ta.focus();
-      } else if (act === "note-cancel") {
-        const n = item.querySelector("[data-note]"); n.classList.remove("open"); const ta = n.querySelector("textarea"); if (ta) ta.value = "";
+        openDealFromPending(id); // abre el panel completo de edición (bloques A/B)
       } else if (act === "check") {
         await doPendingAction(item, { dealId: id, action: "check" }, btn);
-      } else if (act === "note-save") {
-        const ta = item.querySelector("[data-note] textarea");
-        const comment = (ta.value || "").trim();
-        if (!comment) { toast("Escribe un comentario o usa ✓."); return; }
-        await doPendingAction(item, { dealId: id, action: "note", comment }, btn);
       } else if (act === "field-save") {
         const fields = collectPendingFields(item);
         if (!Object.keys(fields).length) { toast("Completa al menos un campo."); return; }
