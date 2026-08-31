@@ -96,12 +96,6 @@ export function weekMomentMs(nowMs, daysFromMonday, hour, min) {
 export function mondayStartMs(nowMs = Date.now()) { return weekMomentMs(nowMs, 0, 0, 0); }
 export function wed6pmMs(nowMs = Date.now()) { return weekMomentMs(nowMs, 2, 18, 0); }
 
-// Mes en curso en hora Perú, como "YYYY-MM".
-export function peruYearMonth(nowMs = Date.now()) {
-  const w = peruWall(nowMs);
-  return `${w.getUTCFullYear()}-${String(w.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 // ---- Cumplimiento ----
 // Un partner CUMPLE si editó al menos una vez en la ventana (activity_log) O
 // confirmó "Sí" en la revisión de la semana.
