@@ -30,31 +30,14 @@
 import { makeTransport, escHtml as esc } from "./_mail.js";
 import { partners, partnerEmails, weekStartStr, peruYearMonth } from "./_week.js";
 import { pdEnv, makePd } from "./_pd.js";
+import { fetchHotLeadsByPartner } from "./_hotleads.js";
+import { signPartnerWeek } from "./_sign.js";
 
-const PIPELINE = 1;
-const STAGE_CIERRE = 55;   // "Follow-up y cierre"
-const MIN_PROB = 75;
 const EMAIL_MODE = "hot-leads";
-const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+const APP_BASE = () => process.env.APP_URL || "https://app-leadsmambo.vercel.app";
 
-const norm = (s) => (s || "").toString().toLowerCase().trim();
-const ownerNameOf = (d) => (d.owner_name || (d.user_id && d.user_id.name) || "").toString();
-const orgNameOf = (d) => (d.org_name || (d.org_id && d.org_id.name) || "").toString();
-function fmtMonthYear(dateStr) { const [y, m] = String(dateStr || "").split("-"); return `${MESES[Number(m) - 1] || m} ${y}`; }
-function fmtMoney(n) { return "US$" + (Number(n) || 0).toLocaleString("en-US"); }
-
-async function fetchP1OpenDeals(pd) {
-  const out = []; let s = 0;
-  for (let g = 0; g < 100; g++) {
-    const j = await pd.get(`/pipelines/${PIPELINE}/deals`, { status: "open", limit: "500", start: String(s) });
-    (j.data || []).forEach((d) => { if (Number(d.pipeline_id) === PIPELINE) out.push(d); });
-    const pag = j.additional_data && j.additional_data.pagination;
-    if (pag && pag.more_items_in_collection) s = pag.next_start; else break;
-  }
-  return out;
-}
-
-function leadEmailHtml(partnerName, leads, testForLabel) {
+// ackUrl = enlace firmado "Sin novedades"; appUrl = "Actualizar" (vista principal).
+function leadEmailHtml(partnerName, leads, ackUrl, testForLabel) {
   const q = leads.length === 1
     ? "¿Hay alguna novedad con respecto al siguiente lead?"
     : "¿Hay alguna novedad con respecto a alguno de los siguientes leads?";
@@ -66,8 +49,7 @@ function leadEmailHtml(partnerName, leads, testForLabel) {
   const testBanner = testForLabel
     ? `<div style="background:#FFF3CD;color:#7a5c00;border:1px solid #ffe08a;border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px;font-weight:700">🧪 PRUEBA — este correo era originalmente para: ${esc(testForLabel)}</div>`
     : "";
-  const appUrl = process.env.APP_URL || "https://app-leadsmambo.vercel.app";
-  const pipedriveUrl = process.env.PIPEDRIVE_URL || "https://mambo.pipedrive.com";
+  const appUrl = APP_BASE();
 
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1D0446">
@@ -80,12 +62,13 @@ function leadEmailHtml(partnerName, leads, testForLabel) {
     <p style="font-size:16px;font-weight:700;line-height:1.5;margin:0 0 12px">${q}</p>
     <ul style="padding-left:18px;margin:0 0 18px">${items}</ul>
     <p style="font-size:14px;line-height:1.55;margin:0 0 20px;color:#3a3350">
-      Son leads clave: conviene mantener su información al día. Si el lead te respondió o hay
-      alguna novedad, actualízalo para que el cierre no se enfríe.
+      Son leads clave: conviene mantener su información al día. Si hay alguna novedad,
+      pulsa <b>Actualizar</b> y edítalo en la app. Si no hay nada nuevo con ninguno,
+      pulsa <b>Sin novedades</b> para dejar constancia.
     </p>
     <div style="margin:0 0 8px">
-      <a href="${esc(appUrl)}/#pendientes" style="display:inline-block;background:#1D0446;color:#fff;text-decoration:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;margin:0 8px 8px 0">Ir a la app →</a>
-      <a href="${esc(pipedriveUrl)}" style="display:inline-block;background:#E7EEFF;color:#1E56CD;text-decoration:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;margin:0 8px 8px 0">Ir a Pipedrive →</a>
+      <a href="${esc(ackUrl)}" style="display:inline-block;background:#1D0446;color:#fff;text-decoration:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;margin:0 8px 8px 0">Sin novedades ✓</a>
+      <a href="${esc(appUrl)}/" style="display:inline-block;background:#FA5478;color:#fff;text-decoration:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;margin:0 8px 8px 0">Actualizar →</a>
     </div>
     <p style="font-size:13px;color:#6B6582;margin:18px 0 0">Mantente pendiente por si hay respuesta o novedad de parte del lead.</p>
     <p style="font-size:13px;color:#6B6582;margin:20px 0 0">— mambo · pipeline</p>
@@ -155,25 +138,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1) Traer negocios abiertos del pipeline 1 y filtrar los "calientes" por partner.
-    const wanted = new Set(list.map(norm));
-    const nameToDisplay = {}; list.forEach((p) => { nameToDisplay[norm(p)] = p; });
-    const byPartner = {}; list.forEach((p) => { byPartner[p] = []; });
-
-    const deals = await fetchP1OpenDeals(pd);
-    for (const d of deals) {
-      const on = norm(ownerNameOf(d));
-      if (!wanted.has(on)) continue;
-      const prob = Number(d.probability);
-      const closeYM = (d.expected_close_date || "").slice(0, 7);
-      if (!(prob >= MIN_PROB && Number(d.stage_id) === STAGE_CIERRE && closeYM === ym)) continue;
-      byPartner[nameToDisplay[on]].push({
-        title: (d.title || "(sin título)").toString(),
-        org: orgNameOf(d),
-        money: fmtMoney(d.value),
-        closeLabel: fmtMonthYear(d.expected_close_date),
-      });
-    }
+    // 1) Leads calientes por partner (criterio compartido con el reporte).
+    const byPartner = await fetchHotLeadsByPartner(pd, list, ym);
 
     // 2) Destinatarios = partners con al menos un lead caliente.
     const recipients = list.filter((p) => byPartner[p].length > 0);
@@ -196,8 +162,10 @@ export default async function handler(req, res) {
         }
 
         const subject = testTo ? `[PRUEBA — originalmente para: ${p}] 🔥 Tus leads calientes` : "🔥 Tus leads calientes — cierre este mes";
+        // Enlace firmado "Sin novedades": identifica al partner + semana sin sesión.
+        const ackUrl = `${APP_BASE()}/api/hot-leads-ack?t=${encodeURIComponent(signPartnerWeek(p, weekStart))}`;
         try {
-          await transporter.sendMail({ from, to, subject, html: leadEmailHtml(p, byPartner[p], testTo ? p : null) });
+          await transporter.sendMail({ from, to, subject, html: leadEmailHtml(p, byPartner[p], ackUrl, testTo ? p : null) });
           sent.push({ partner: p, to, leads: byPartner[p].length });
         } catch (e) {
           if (!testTo) await unreserve(p);
