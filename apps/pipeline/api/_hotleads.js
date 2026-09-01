@@ -1,8 +1,8 @@
 // ============================================================
 // mambo · Pipeline — leads "calientes" (criterio compartido)
 //
-// Módulo auxiliar ("_" → no es ruta). Lo usan el correo (hot-leads-email) y el
-// reporte a Slack (hot-leads-status) para calcular EXACTAMENTE el mismo conjunto.
+// Módulo auxiliar ("_" → no es ruta). Lo usa hot-leads.js (acciones email y
+// status) para calcular EXACTAMENTE el mismo conjunto de leads calientes.
 //
 // Un negocio del pipeline 1 es lead caliente si (los tres a la vez):
 //   probabilidad >= 75, etapa "Follow-up y cierre" (stage 55), y la fecha de
