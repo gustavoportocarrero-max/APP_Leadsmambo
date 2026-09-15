@@ -21,6 +21,8 @@
 // Ver mapeo campos: GET /api/pipedrive-pull?key=<CRON_SECRET>&fields=1  (no sincroniza)
 // ============================================================
 
+import { pipedriveTokenDown, pipedriveTokenHealthy } from "./_alert.js";
+
 const ALLOWED_PIPELINE = 1;
 const STAGE_BY_PD_ID = { 1: "target", 2: "contacto", 16: "primera", 52: "propuesta", 55: "cierre", 11: "nurturing" };
 
@@ -102,7 +104,11 @@ export default async function handler(req, res) {
     for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
     const r = await fetch(u.toString());
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.success === false) throw new Error(`Pipedrive ${path} → HTTP ${r.status} ${JSON.stringify(j.error || "")}`);
+    if (!r.ok || j.success === false) {
+      const err = new Error(`Pipedrive ${path} → HTTP ${r.status} ${JSON.stringify(j.error || "")}`);
+      err.status = r.status; // para detectar 401 (token caído)
+      throw err;
+    }
     return j;
   };
 
@@ -293,10 +299,12 @@ export default async function handler(req, res) {
       ms: Date.now() - started,
     };
     console.log("[pipedrive-pull]", JSON.stringify(summary));
+    await pipedriveTokenHealthy(); // corrida exitosa → si estaba caído, avisa recuperación
     res.status(200).json(summary);
   } catch (e) {
     const fail = { ok: false, error: String(e && e.message ? e.message : e), ms: Date.now() - started };
     console.error("[pipedrive-pull] ERROR", JSON.stringify(fail));
+    if (e && e.status === 401) await pipedriveTokenDown("pipedrive-pull (sincronización cada 2h)");
     res.status(502).json(fail);
   }
 }

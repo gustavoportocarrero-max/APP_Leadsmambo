@@ -23,6 +23,8 @@
 //   Sin ninguna de las dos últimas → TODO se simula (no escribe nada).
 // ============================================================
 
+import { pipedriveTokenDown } from "./_alert.js";
+
 const ALLOWED_PIPELINE = 1;
 
 // Etapa de la app → stage_id de Pipedrive (pipeline 1). Fuente de verdad del mapeo.
@@ -99,6 +101,12 @@ export default async function handler(req, res) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.success === false || !j.data) {
       log({ pipedriveId, step: "get", ok: false, status: r.status });
+      if (r.status === 401) {
+        // Token inválido/revocado → alerta (una vez) y el cambio queda pendiente.
+        await pipedriveTokenDown("pipedrive-sync (guardar cambio)");
+        res.status(502).json({ ok: false, error: "Pipedrive rechazó el token (401). Avisamos al administrador; tu cambio quedó pendiente para reintentar." });
+        return;
+      }
       res.status(404).json({ ok: false, error: `No se encontró el deal ${pipedriveId} en Pipedrive.` });
       return;
     }
