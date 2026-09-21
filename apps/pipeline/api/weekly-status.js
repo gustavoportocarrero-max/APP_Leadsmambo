@@ -32,23 +32,19 @@ import { pdEnv, makePd } from "./_pd.js";
 
 const ALLOWED_PIPELINE = 1;
 const norm = (s) => (s || "").toString().toLowerCase().trim();
+// Normaliza nombres para comparar propietarios: minúsculas + colapsa cualquier
+// espacio (incluye NBSP y dobles espacios) a uno solo. Robusto a "Renzo  Duarte".
+const cleanName = (s) => (s || "").toString().toLowerCase().replace(/\s+/g, " ").trim();
 const ownerNameOf = (d) => (d.owner_name || (d.user_id && d.user_id.name) || "").toString();
 
-// Negocios del pipeline 1 modificados desde `startMs` (orden update_time desc;
-// corta al encontrar uno más viejo que la ventana → solo trae la porción reciente).
-async function fetchRecentP1(pd, startMs) {
+// TODOS los negocios del pipeline 1 (open + cerrados no borrados), paginado COMPLETO.
+// No depende del orden de Pipedrive (el endpoint no garantiza `sort`), así que
+// recorre todas las páginas y el filtrado por update_time se hace después.
+async function fetchAllP1(pd) {
   const out = []; let s = 0;
-  for (let g = 0; g < 100; g++) {
-    const j = await pd.get(`/pipelines/${ALLOWED_PIPELINE}/deals`, { status: "all_not_deleted", sort: "update_time DESC", limit: "100", start: String(s) });
-    const rows = j.data || [];
-    let stop = false;
-    for (const d of rows) {
-      if (Number(d.pipeline_id) !== ALLOWED_PIPELINE) continue;
-      const ut = d.update_time ? Date.parse(d.update_time.replace(" ", "T") + "Z") : NaN;
-      if (!Number.isNaN(ut) && ut < startMs) { stop = true; break; }
-      out.push(d);
-    }
-    if (stop) break;
+  for (let g = 0; g < 200; g++) {
+    const j = await pd.get(`/pipelines/${ALLOWED_PIPELINE}/deals`, { status: "all_not_deleted", limit: "500", start: String(s) });
+    (j.data || []).forEach((d) => { if (Number(d.pipeline_id) === ALLOWED_PIPELINE) out.push(d); });
     const pag = j.additional_data && j.additional_data.pagination;
     if (pag && pag.more_items_in_collection) s = pag.next_start; else break;
   }
@@ -71,6 +67,8 @@ export default async function handler(req, res) {
   const slack = process.env.SLACK_WEBHOOK_URL;
   if (!sbUrl || !sbKey) { res.status(500).json({ ok: false, error: "Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY." }); return; }
   const dry = req.query && req.query.dry === "1";
+  // Diagnóstico: ?debugDeal=<id> reporta si ese negocio aparece en la consulta y por qué (no) cuenta.
+  const debugDealId = (req.query && req.query.debugDeal && /^\d+$/.test(String(req.query.debugDeal))) ? Number(req.query.debugDeal) : null;
   if (!slack && !dry) { res.status(500).json({ ok: false, error: "Falta SLACK_WEBHOOK_URL." }); return; }
 
   const list = partners();
@@ -99,24 +97,45 @@ export default async function handler(req, res) {
     // Vía Pipedrive (cambio directo): update_time en la ventana, excluyendo ecos de
     // la app (negocios que la app tocó esa semana, según activity_log.pipedrive_id).
     // Best-effort: si Pipedrive no responde, se marca "sin evaluar" y NO rompe el reporte.
-    const partnerByNorm = {}; list.forEach((p) => { partnerByNorm[norm(p)] = p; });
+    const partnerByClean = {}; list.forEach((p) => { partnerByClean[cleanName(p)] = p; });
     const pdChanged = {}; list.forEach((p) => { pdChanged[p] = false; });
     let pdError = null;
+    let pdDiag = null;
     try {
       const { token, base } = pdEnv();
       if (!token) throw new Error("Falta PIPEDRIVE_API_TOKEN.");
       const pd = makePd(token, base);
       const startMs = mondayStartMs(), endMs = wed6pmMs();
       const appWritten = new Set(activityRows.filter((r) => r.pipedrive_id != null).map((r) => Number(r.pipedrive_id)));
-      const deals = await fetchRecentP1(pd, startMs);
+      const deals = await fetchAllP1(pd);
+      const ownersInWindow = new Set();
+      let inWindowCount = 0;
+      let debugDeal = debugDealId ? { id: debugDealId, encontrado: false } : undefined;
       for (const d of deals) {
-        const p = partnerByNorm[norm(ownerNameOf(d))];
-        if (!p) continue;
+        const rawOwner = ownerNameOf(d);
+        const p = partnerByClean[cleanName(rawOwner)];
         const ut = d.update_time ? Date.parse(d.update_time.replace(" ", "T") + "Z") : NaN;
-        if (Number.isNaN(ut) || ut < startMs || ut > endMs) continue;
-        if (appWritten.has(Number(d.id))) continue; // eco de la propia app → no cuenta
-        pdChanged[p] = true;
+        const inWin = !Number.isNaN(ut) && ut >= startMs && ut <= endMs;
+        const isEco = appWritten.has(Number(d.id));
+        if (debugDealId && Number(d.id) === debugDealId) {
+          debugDeal = {
+            id: debugDealId, encontrado: true,
+            owner_name: rawOwner, partner_match: p || null,
+            update_time: d.update_time || null, en_ventana: inWin,
+            es_eco_app: isEco, pipeline_id: d.pipeline_id, stage_id: d.stage_id, status: d.status,
+            cuenta_pipedrive: !!(p && inWin && !isEco),
+          };
+        }
+        if (inWin) { inWindowCount++; ownersInWindow.add(rawOwner); }
+        if (p && inWin && !isEco) pdChanged[p] = true;
       }
+      pdDiag = {
+        negocios_total: deals.length,
+        modificados_en_ventana: inWindowCount,
+        ventana: { desde: new Date(startMs).toISOString(), hasta: new Date(endMs).toISOString() },
+        propietarios_en_ventana: [...ownersInWindow],
+        debug_deal: debugDeal,
+      };
     } catch (e) {
       pdError = String(e && e.message ? e.message : e);
       console.warn("[weekly-status] Pipedrive no disponible:", pdError);
@@ -155,6 +174,7 @@ export default async function handler(req, res) {
       cumplen, total: list.length,
       pipedrive: pdError ? ("no disponible: " + pdError) : "consultado",
       estado: estado.map((e) => ({ partner: e.partner, ok: e.ok, origen: e.origen, edito: e.edito, confirmo: e.confirmo, pipedrive: e.pipedrive })),
+      diagnostico: (dry || debugDealId) ? pdDiag : undefined,
       slack: dry ? "no enviado (dry)" : (slackOk ? "enviado" : "error"),
       preview: text,
     };
