@@ -2,6 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
+  "functions": {
+    "api/hot-leads.js": { "maxDuration": 60 },
+    "api/weekly-email.js": { "maxDuration": 60 },
+    "api/pipedrive-pull.js": { "maxDuration": 60 }
+  },
   "crons": [
     {
       "path": "/api/pipedrive-pull",

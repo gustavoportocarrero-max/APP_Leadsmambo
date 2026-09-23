@@ -23,7 +23,7 @@
 //   /api/hot-leads?action=ack&t=<token>             (lo abre el partner desde el correo)
 // ============================================================
 
-import { makeTransport, escHtml as esc } from "./_mail.js";
+import { makeTransport, sendMany, escHtml as esc } from "./_mail.js";
 import { partners, partnerEmails, weekStartStr, mondayStartMs, peruYearMonth } from "./_week.js";
 import { pdEnv, makePd } from "./_pd.js";
 import { fetchHotLeadsByPartner } from "./_hotleads.js";
@@ -143,34 +143,38 @@ async function handleEmail(req, res) {
     const byPartner = await fetchHotLeadsByPartner(pd, list, ym);
     const recipients = list.filter((p) => byPartner[p].length > 0);
 
-    const transporter = dry ? null : makeTransport(gmailUser, gmailPass);
     const sent = [], failed = [], skipped = [];
-    try {
-      for (const p of recipients) {
-        const to = testTo || emails[p];
-        if (!to) { skipped.push({ partner: p, reason: "sin correo" }); continue; }
-        if (dry) { sent.push({ partner: p, to, para_original: p, leads: byPartner[p].length, dry: true }); continue; }
 
-        if (!testTo) {
-          if (force) await unreserve(p);
-          let reserved;
-          try { reserved = await reserve(p); }
-          catch (e) { failed.push({ partner: p, to, error: "reserva: " + (e.message || e) }); continue; }
-          if (!reserved) { skipped.push({ partner: p, reason: "ya enviado esta semana (idempotencia)" }); continue; }
-        }
+    // Fase 1: reservar (idempotencia) y armar los mensajes a enviar.
+    const messages = [];
+    for (const p of recipients) {
+      const to = testTo || emails[p];
+      if (!to) { skipped.push({ partner: p, reason: "sin correo" }); continue; }
+      if (dry) { sent.push({ partner: p, to, para_original: p, leads: byPartner[p].length, dry: true }); continue; }
 
-        const subject = testTo ? `[PRUEBA — originalmente para: ${p}] 🔥 Tus leads calientes` : "🔥 Tus leads calientes — cierre este mes";
-        const ackUrl = `${APP_BASE()}/api/hot-leads?action=ack&t=${encodeURIComponent(signPartnerWeek(p, weekStart))}`;
-        try {
-          await transporter.sendMail({ from, to, subject, html: leadEmailHtml(p, byPartner[p], ackUrl, testTo ? p : null) });
-          sent.push({ partner: p, to, leads: byPartner[p].length });
-        } catch (e) {
-          if (!testTo) await unreserve(p);
-          failed.push({ partner: p, to, error: String(e && e.message ? e.message : e) });
-        }
+      if (!testTo) {
+        if (force) await unreserve(p);
+        let reserved;
+        try { reserved = await reserve(p); }
+        catch (e) { failed.push({ partner: p, to, error: "reserva: " + (e.message || e) }); continue; }
+        if (!reserved) { skipped.push({ partner: p, reason: "ya enviado esta semana (idempotencia)" }); continue; }
       }
-    } finally {
-      if (transporter) try { transporter.close(); } catch (_) {}
+
+      const subject = testTo ? `[PRUEBA — originalmente para: ${p}] 🔥 Tus leads calientes` : "🔥 Tus leads calientes — cierre este mes";
+      const ackUrl = `${APP_BASE()}/api/hot-leads?action=ack&t=${encodeURIComponent(signPartnerWeek(p, weekStart))}`;
+      messages.push({ key: p, to, mail: { from, to, subject, html: leadEmailHtml(p, byPartner[p], ackUrl, testTo ? p : null) } });
+    }
+
+    // Fase 2: enviar TODO en paralelo (pool). Un fallo no tumba a los demás.
+    if (messages.length) {
+      const transporter = makeTransport(gmailUser, gmailPass);
+      try {
+        const results = await sendMany(transporter, messages);
+        for (const r of results) {
+          if (r.ok) sent.push({ partner: r.key, leads: byPartner[r.key].length });
+          else { if (!testTo) await unreserve(r.key); failed.push({ partner: r.key, error: r.error }); }
+        }
+      } finally { try { transporter.close(); } catch (_) {} }
     }
 
     const summary = {

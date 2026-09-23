@@ -40,7 +40,7 @@
 //                  jobs NO llevan este parámetro.
 // ============================================================
 
-import nodemailer from "nodemailer";
+import { makeTransport, sendMany } from "./_mail.js";
 import { partners, partnerEmails, weekStartStr, mondayStartMs, computeCompliance } from "./_week.js";
 import { fetchPendingByPartner } from "./_pending.js";
 
@@ -117,18 +117,6 @@ function emailHtml(partnerName, pending, testForLabel) {
     ${pendingHtml(pending)}
     <p style="font-size:13px;color:#6B6582;margin:26px 0 0">— mambo · pipeline</p>
   </div>`;
-}
-
-// Transporter SMTP con POOL (reutiliza una conexión → rápido, evita timeouts).
-function makeTransport(user, appPassword) {
-  const port = Number(process.env.SMTP_PORT || 465);
-  return nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port,
-    secure: port === 465, // 465 → SSL; 587 → STARTTLS
-    pool: true, maxConnections: 1, maxMessages: 50,
-    auth: { user, pass: String(appPassword || "").replace(/\s+/g, "") },
-  });
 }
 
 export default async function handler(req, res) {
@@ -218,37 +206,39 @@ export default async function handler(req, res) {
     else { pendingWarning = pd.error; console.warn("[weekly-email] pendientes no disponibles:", pd.error); }
 
     // 3) Enviar (o simular), con idempotencia.
-    const transporter = dry ? null : makeTransport(gmailUser, gmailPass);
     const sent = [], failed = [], skipped = [];
-    try {
-      for (const p of recipients) {
-        // En modo prueba, TODO va a testTo (no al correo real del partner).
-        const to = testTo || emails[p];
-        if (!to) { skipped.push({ partner: p, reason: "sin correo" }); continue; }
-        if (dry) { sent.push({ partner: p, to, para_original: p, dry: true }); continue; }
 
-        // Idempotencia: solo en envío real a partners (no en modo prueba con testTo).
-        if (!testTo) {
-          if (force) await unreserve(p);
-          let reserved;
-          try { reserved = await reserve(p); }
-          catch (e) { failed.push({ partner: p, to, error: "reserva: " + (e.message || e) }); continue; }
-          if (!reserved) { skipped.push({ partner: p, reason: "ya enviado esta semana (idempotencia)" }); continue; }
-        }
+    // Fase 1: reservar (idempotencia) y armar los mensajes.
+    const messages = [];
+    for (const p of recipients) {
+      // En modo prueba, TODO va a testTo (no al correo real del partner).
+      const to = testTo || emails[p];
+      if (!to) { skipped.push({ partner: p, reason: "sin correo" }); continue; }
+      if (dry) { sent.push({ partner: p, to, para_original: p, dry: true }); continue; }
 
-        // El asunto y el cuerpo indican de quién era el correo (solo en prueba).
-        // El resumen A/B/C sigue siendo el del partner original (pendingByPartner[p]).
-        const subject = testTo ? `[PRUEBA — originalmente para: ${p}] ${SUBJECT}` : SUBJECT;
-        try {
-          await transporter.sendMail({ from, to, subject, html: emailHtml(p, pendingByPartner[p], testTo ? p : null) });
-          sent.push(testTo ? { partner: p, to, para_original: p } : { partner: p, to });
-        } catch (e) {
-          if (!testTo) await unreserve(p); // liberar para poder reintentar
-          failed.push({ partner: p, to, error: String(e && e.message ? e.message : e) });
-        }
+      // Idempotencia: solo en envío real a partners (no en modo prueba con testTo).
+      if (!testTo) {
+        if (force) await unreserve(p);
+        let reserved;
+        try { reserved = await reserve(p); }
+        catch (e) { failed.push({ partner: p, to, error: "reserva: " + (e.message || e) }); continue; }
+        if (!reserved) { skipped.push({ partner: p, reason: "ya enviado esta semana (idempotencia)" }); continue; }
       }
-    } finally {
-      if (transporter) try { transporter.close(); } catch (_) {}
+
+      const subject = testTo ? `[PRUEBA — originalmente para: ${p}] ${SUBJECT}` : SUBJECT;
+      messages.push({ key: p, to, mail: { from, to, subject, html: emailHtml(p, pendingByPartner[p], testTo ? p : null) } });
+    }
+
+    // Fase 2: enviar TODO en paralelo (pool). Un fallo no tumba a los demás.
+    if (messages.length) {
+      const transporter = makeTransport(gmailUser, gmailPass);
+      try {
+        const results = await sendMany(transporter, messages);
+        for (const r of results) {
+          if (r.ok) sent.push(testTo ? { partner: r.key, para_original: r.key } : { partner: r.key });
+          else { if (!testTo) await unreserve(r.key); failed.push({ partner: r.key, error: r.error }); }
+        }
+      } finally { try { transporter.close(); } catch (_) {} }
     }
 
     // Desglose de pendientes por destinatario (para verificar con dry=1).
