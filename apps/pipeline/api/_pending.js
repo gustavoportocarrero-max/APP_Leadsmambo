@@ -3,12 +3,13 @@
 //
 // Módulo auxiliar ("_" → no es ruta). Lo usa weekly-email para armar, al momento
 // de enviar cada correo, el resumen accionable de cada partner. Consulta Pipedrive
-// EN VIVO (pipeline 1) una sola vez por ejecución y calcula 3 bloques por partner:
+// EN VIVO (pipeline 1) una sola vez por ejecución y calcula 2 bloques por partner:
 //
 //   A) Negocios ANTIGUOS: creados hace >30 días (add_time), en una de las 4 etapas
 //      (contacto, primera, propuesta, cierre).
-//   B) Negocios en FOLLOW-UP Y CIERRE (etapa "cierre").
 //   C) Negocios con CAMPOS OBLIGATORIOS incompletos, según su etapa.
+//   (El antiguo bloque B "Follow-up y cierre" se eliminó; la etapa cierre sigue
+//    contando para A y C como una de las 4 etapas activas.)
 //
 // Campos obligatorios por etapa:
 //   contacto:  Industria, Tipo de cliente, País, Persona de contacto, Fuente lead
@@ -139,7 +140,7 @@ export async function fetchPendingByPartner(partnersList) {
     // 5) Agrupar por partner.
     const wanted = new Set(partnersList.map(norm));
     const byPartner = {};
-    partnersList.forEach((p) => { byPartner[p] = { antiguos: [], cierre: [], incompletos: [] }; });
+    partnersList.forEach((p) => { byPartner[p] = { antiguos: [], incompletos: [] }; });
     const nameToDisplay = {};
     partnersList.forEach((p) => { nameToDisplay[norm(p)] = p; });
 
@@ -164,9 +165,6 @@ export async function fetchPendingByPartner(partnersList) {
         const ageDays = Math.floor((now - addMs) / (24 * 60 * 60 * 1000));
         byPartner[partner].antiguos.push({ id, title, org, stageLabel, ageDays });
       }
-
-      // Bloque B: etapa cierre
-      if (stage === "cierre") byPartner[partner].cierre.push({ id, title, org });
 
       // Bloque C: campos obligatorios faltantes. `missing` = [{key, label}] para que
       // quien consuma sepa qué control mostrar (frontend) o solo la etiqueta (correo).

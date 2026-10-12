@@ -1379,16 +1379,15 @@
         default: return true;
       }
     };
-    const A = [], B = [], C = [];
+    const A = [], C = [];
     deals.filter((d) => d.owner === currentUser && d.status === "activo" && FOUR.has(d.stage)).forEach((d) => {
       if (!resolved.has(d.id)) {
         A.push({ id: d.id, title: d.title, org: d.org, stageLabel: label(d.stage), ageDays: "—" });
-        if (d.stage === "cierre") B.push({ id: d.id, title: d.title, org: d.org });
       }
       const missing = (reqDemo[d.stage] || []).filter((k) => !hasField(d, k)).map((k) => ({ key: k, label: missLabel[k] }));
       if (missing.length) C.push({ id: d.id, title: d.title, org: d.org, stageLabel: label(d.stage), missing });
     });
-    return { A, B, C };
+    return { A, C };
   }
 
   /* ---- render ---- */
@@ -1428,9 +1427,9 @@
   }
 
   function renderPending(blocks) {
-    const A = blocks.A || [], B = blocks.B || [], C = blocks.C || [];
+    const A = blocks.A || [], C = blocks.C || [];
     const sub = (d) => `${escapeHtml(d.org || "")}${d.stageLabel ? ` · ${escapeHtml(d.stageLabel)}` : ""}${(d.ageDays && d.ageDays !== "—") ? ` · ${d.ageDays} días` : ""}`;
-    const itemAB = (d) => `
+    const itemA = (d) => `
       <div class="pending-item" data-id="${d.id}">
         <div class="pi-head">
           <div class="pi-info"><div class="pi-title">${escapeHtml(d.title)}</div><div class="pi-sub">${sub(d)}</div></div>
@@ -1458,12 +1457,7 @@
       <div class="pending-block" data-block="A">
         <h3>Negocios que no has tocado</h3>
         <div class="pending-q">¿Se debe hacer algo con alguno de estos negocios?</div>
-        ${A.length ? A.map(itemAB).join("") : `<div class="pending-empty">Sin negocios antiguos pendientes ✅</div>`}
-      </div>
-      <div class="pending-block" data-block="B">
-        <h3>Follow-up y cierre</h3>
-        <div class="pending-q">¿Hay algún comentario que puedas agregar que actualice estos negocios?</div>
-        ${B.length ? B.map(itemAB).join("") : `<div class="pending-empty">Sin negocios en Follow-up y cierre ✅</div>`}
+        ${A.length ? A.map(itemA).join("") : `<div class="pending-empty">Sin negocios antiguos pendientes ✅</div>`}
       </div>
       <div class="pending-block" data-block="C">
         <h3>Campos por completar</h3>

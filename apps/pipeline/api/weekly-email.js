@@ -12,8 +12,8 @@
 // de cron-job.org), NO se reenvía. Si el envío falla, se libera la reserva.
 //
 // Cada correo incluye un RESUMEN PERSONALIZADO con los pendientes reales del
-// partner, consultando Pipedrive en vivo (ver _pending.js): negocios antiguos,
-// en Follow-up y cierre, y con campos obligatorios incompletos.
+// partner, consultando Pipedrive en vivo (ver _pending.js): negocios antiguos
+// (>30 días) y con campos obligatorios incompletos.
 //
 // Envío por SMTP autenticado del buzón de Google Workspace (nodemailer + pool).
 //
@@ -52,7 +52,7 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "
 // pending = { antiguos:[], cierre:[], incompletos:[] } o null (Pipedrive no disponible).
 function pendingHtml(pending) {
   if (!pending) return "";
-  const A = pending.antiguos || [], B = pending.cierre || [], C = pending.incompletos || [];
+  const A = pending.antiguos || [], C = pending.incompletos || [];
   const li = (inner) => `<li style="margin:7px 0;line-height:1.45">${inner}</li>`;
   const name = (d) => `<b>${esc(d.title)}</b>${d.org ? ` <span style="color:#6B6582">· ${esc(d.org)}</span>` : ""}`;
   const empty = (t) => `<div style="color:#6B6582;font-size:13px;margin:2px 0 0">${t}</div>`;
@@ -67,12 +67,6 @@ function pendingHtml(pending) {
         `${name(d)} <span style="color:#6B6582">(${esc(d.stageLabel)}, ${d.ageDays} días)</span><br/>` +
         `<span style="color:#B23A57">👀 Ojo a este negocio que no lo has tocado hace un tiempo</span>`)).join("") + `</ul>`
     : empty("Sin negocios antiguos pendientes ✅");
-
-  // Bloque B — Follow-up y cierre
-  h += `<div style="font-size:14px;font-weight:700;margin:20px 0 6px">¿Hay algún comentario que puedas agregar en "comentarios" que actualice la información de estos negocios?</div>`;
-  h += B.length
-    ? `<ul style="padding-left:18px;margin:0">` + B.map((d) => li(name(d))).join("") + `</ul>`
-    : empty("Sin negocios en Follow-up y cierre ✅");
 
   // Bloque C — campos incompletos
   h += `<div style="font-size:14px;font-weight:700;margin:20px 0 6px">Estos negocios tienen campos por completar:</div>`;
@@ -244,10 +238,10 @@ export default async function handler(req, res) {
     // Desglose de pendientes por destinatario (para verificar con dry=1).
     const pendientes = {};
     recipients.forEach((p) => {
-      const b = pendingByPartner[p] || { antiguos: [], cierre: [], incompletos: [] };
+      const b = pendingByPartner[p] || { antiguos: [], incompletos: [] };
       pendientes[p] = dry
-        ? b // en dry, el detalle completo para revisar los bloques A/B/C
-        : { antiguos: b.antiguos.length, cierre: b.cierre.length, incompletos: b.incompletos.length };
+        ? b // en dry, el detalle completo para revisar los bloques A y C
+        : { antiguos: b.antiguos.length, incompletos: b.incompletos.length };
     });
 
     const summary = {

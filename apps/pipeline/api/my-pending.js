@@ -81,7 +81,7 @@ export default async function handler(req, res) {
     try {
       const pending = await fetchPendingByPartner([partner]);
       if (!pending.ok) throw new Error(pending.error || "No se pudo consultar Pipedrive.");
-      const b = pending.byPartner[partner] || { antiguos: [], cierre: [], incompletos: [] };
+      const b = pending.byPartner[partner] || { antiguos: [], incompletos: [] };
 
       const resolvedRows = await sb.get(`pending_resolved?partner=eq.${encodeURIComponent(partner)}&week_start=eq.${week}&select=deal_id`);
       const resolved = new Set((resolvedRows || []).map((r) => Number(r.deal_id)));
@@ -90,7 +90,6 @@ export default async function handler(req, res) {
         ok: true, partner, week,
         blocks: {
           A: b.antiguos.filter((d) => !resolved.has(Number(d.id))),
-          B: b.cierre.filter((d) => !resolved.has(Number(d.id))),
           C: b.incompletos,
         },
       });
